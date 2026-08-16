@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="330" viewBox="0 0 820 330" role="img" aria-label="Development architecture diagram for Virtual Reading World">
+  <rect width="820" height="330" fill="#f8fbff"/>
+
+  <rect x="40" y="70" width="180" height="90" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="130" y="108" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="600" fill="#111827">Reader Client</text>
+  <text x="130" y="132" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#374151">Browser / mobile</text>
+
+  <rect x="290" y="70" width="180" height="90" rx="10" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+  <text x="380" y="108" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="600" fill="#111827">Frontend UI</text>
+  <text x="380" y="132" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#374151">React + Vite</text>
+
+  <rect x="540" y="70" width="180" height="90" rx="10" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <text x="630" y="108" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="600" fill="#111827">Backend API</text>
+  <text x="630" y="132" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#374151">Node.js + Express</text>
+
+  <rect x="560" y="220" width="140" height="70" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="630" y="251" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="600" fill="#111827">DB</text>
+  <text x="630" y="273" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#374151">Postgres</text>
+
+  <line x1="220" y1="115" x2="290" y2="115" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="470" y1="115" x2="540" y2="115" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="630" y1="160" x2="630" y2="220" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <text x="60" y="300" text-anchor="start" font-family="Arial, sans-serif" font-size="12" fill="#475569">Development view: browser/mobile client talks to the local backend and database</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+  </defs>
+</svg>

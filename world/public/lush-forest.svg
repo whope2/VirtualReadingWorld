@@ -1,0 +1,43 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" fill="#0f2640"/>
+  <rect y="0" width="1600" height="900" fill="url(#sky)"/>
+  <rect y="640" width="1600" height="260" fill="#3d6b3f"/>
+  <path d="M0 646C161 596 325 592 451 628C480 636 517 648 554 648C651 648 742 606 839 606C967 606 1088 673 1220 673C1336 673 1460 632 1600 592V900H0V646Z" fill="#5b8b4d"/>
+  <path d="M0 712C156 677 315 675 470 707C607 734 722 770 852 770C996 770 1111 712 1274 712C1398 712 1498 735 1600 762V900H0V712Z" fill="#48723e"/>
+  <g opacity="0.95">
+    <path d="M260 620L170 764H350L260 620Z" fill="#254429"/>
+    <path d="M260 620L330 764H190L260 620Z" fill="#2d5130"/>
+    <path d="M260 560L180 700H340L260 560Z" fill="#37633a"/>
+  </g>
+  <g opacity="0.95">
+    <path d="M520 610L420 764H620L520 610Z" fill="#254429"/>
+    <path d="M520 610L590 764H450L520 610Z" fill="#2d5130"/>
+    <path d="M520 548L430 700H610L520 548Z" fill="#37633a"/>
+  </g>
+  <g opacity="0.95">
+    <path d="M1040 612L930 764H1150L1040 612Z" fill="#254429"/>
+    <path d="M1040 612L1110 764H970L1040 612Z" fill="#2d5130"/>
+    <path d="M1040 548L942 700H1138L1040 548Z" fill="#37633a"/>
+  </g>
+  <g opacity="0.95">
+    <path d="M1190 600L1090 764H1290L1190 600Z" fill="#254429"/>
+    <path d="M1190 600L1260 764H1120L1190 600Z" fill="#2d5130"/>
+    <path d="M1190 536L1100 700H1280L1190 536Z" fill="#37633a"/>
+  </g>
+  <g opacity="0.85">
+    <ellipse cx="1320" cy="220" rx="98" ry="62" fill="#fff8c4"/>
+    <ellipse cx="1320" cy="220" rx="68" ry="38" fill="#ffe7a8"/>
+  </g>
+  <g opacity="0.35">
+    <path d="M202 186C247 135 311 120 372 145" stroke="#daf2ff" stroke-width="8" stroke-linecap="round"/>
+    <path d="M869 198C909 147 964 132 1018 153" stroke="#daf2ff" stroke-width="8" stroke-linecap="round"/>
+    <path d="M1320 148C1356 110 1415 104 1470 126" stroke="#daf2ff" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <defs>
+    <linearGradient id="sky" x1="800" y1="0" x2="800" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8bd8ff"/>
+      <stop offset="0.65" stop-color="#4c7b5a"/>
+      <stop offset="1" stop-color="#1f4d2c"/>
+    </linearGradient>
+  </defs>
+</svg>

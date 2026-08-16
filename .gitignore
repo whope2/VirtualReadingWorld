@@ -1,0 +1,19 @@
+# macOS / editor
+.DS_Store
+.vscode/
+
+# Deployment artifacts
+*.tar.gz
+
+# Local runtime data (keep announcement text tracked)
+backend/data/*.sqlite
+backend/data/*.sqlite-shm
+backend/data/*.sqlite-wal
+
+# Node build outputs in case nested ignores are bypassed
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Env files
+backend/.env

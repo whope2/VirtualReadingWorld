@@ -1,0 +1,22 @@
+[Unit]
+Description=Virtual Reading World Backend
+After=network.target
+
+[Service]
+Type=simple
+User=whope2
+WorkingDirectory=/home/whope2/VirtualReadingWorld/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/home/whope2/VirtualReadingWorld/backend/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=3
+
+# Basic hardening with writable app directory for SQLite
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/whope2/VirtualReadingWorld/backend
+
+[Install]
+WantedBy=multi-user.target
