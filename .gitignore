@@ -9,6 +9,7 @@
 backend/data/*.sqlite
 backend/data/*.sqlite-shm
 backend/data/*.sqlite-wal
+backend/*.sqlite
 
 # Node build outputs in case nested ignores are bypassed
 **/node_modules/
