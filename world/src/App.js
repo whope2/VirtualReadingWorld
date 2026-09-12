@@ -1,11 +1,20 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from 'react';
 import './App.css';
 const AVATAR_SIZE = 48;
 const DEFAULT_POSITION = { x: 50, y: 50 };
 const DEFAULT_NORMALIZED_POSITION = { x: 0.5, y: 0.5 };
 const POSITION_SCALE = 10000;
-const AVATAR_OPTIONS = ['📚', '📗', '📒', '📕', '📙', '📓', '🧠', '🦉', '🐰', '🧶', '🗂️', '📜', '🪶', '☕', '🍵', '🐶', '🐱'];
+const BETWEEN_BOOKS_INDEX = 3;
+const BOOK_SLOT_COUNT = 4;
+const BETWEEN_BOOKS_TITLE = 'Between books';
+const BOOK_SLOT_OPTIONS = [
+    { index: 0, label: 'Book 1' },
+    { index: 1, label: 'Book 2' },
+    { index: 2, label: 'Book 3' },
+    { index: BETWEEN_BOOKS_INDEX, label: BETWEEN_BOOKS_TITLE },
+];
+const AVATAR_OPTIONS = ['📚', '📗', '📒', '📕', '📙', '📓', '🧠', '🦉', '🐰', '🧶', '🗂️', '📜', '🪶', '☕', '🍵', '🐶', '🐱', '🕶️'];
 const SCENE_OPTIONS = [
     {
         label: 'Ocean beach',
@@ -15,11 +24,26 @@ const SCENE_OPTIONS = [
         overlay: 'linear-gradient(135deg, rgba(10, 45, 74, 0.2), rgba(61, 152, 208, 0.2))',
     },
     {
+        label: 'Sunrise',
+        shortLabel: 'Sunrise',
+        value: 'sunrise',
+        imagePath: 'sunrise.jpeg',
+        overlay: 'linear-gradient(135deg, rgba(120, 56, 14, 0.26), rgba(255, 170, 94, 0.22))',
+    },
+    {
+        label: 'Night',
+        shortLabel: 'Night',
+        value: 'night',
+        imagePath: 'night.jpg',
+        overlay: 'linear-gradient(135deg, rgba(8, 16, 44, 0.4), rgba(34, 56, 96, 0.24))',
+    },
+    {
         label: 'Lush forest',
         shortLabel: 'Forest',
         value: 'lush-forest',
         imagePath: 'lush-forest.jpg',
         overlay: 'linear-gradient(135deg, rgba(17, 42, 34, 0.35), rgba(91, 139, 77, 0.3))',
+        badge: '🔊',
     },
     {
         label: 'Mountain range',
@@ -35,8 +59,23 @@ const SCENE_OPTIONS = [
         imagePath: 'lake.jpeg',
         overlay: 'linear-gradient(135deg, rgba(12, 56, 74, 0.2), rgba(89, 151, 140, 0.22))',
     },
+    {
+        label: 'Library',
+        shortLabel: 'Library',
+        value: 'library',
+        imagePath: 'library.jpg',
+        overlay: 'linear-gradient(135deg, rgba(64, 42, 24, 0.26), rgba(132, 98, 62, 0.22))',
+    },
+    {
+        label: 'Rain',
+        shortLabel: 'Rain',
+        value: 'rain',
+        imagePath: 'rain.jpg',
+        overlay: 'linear-gradient(135deg, rgba(12, 24, 42, 0.35), rgba(66, 88, 116, 0.25))',
+        badge: '🔊',
+    },
 ];
-const OUTDOOR_SCENES = new Set(['ocean-beach', 'lush-forest', 'mountain-range', 'lake']);
+const OUTDOOR_SCENES = new Set(['sunrise', 'night', 'ocean-beach', 'lush-forest', 'mountain-range', 'lake', 'rain']);
 const BOOK_FORMAT_OPTIONS = [
     { value: 'physical', label: 'Physical book', emoji: '📖' },
     { value: 'ebook', label: 'Ebook', emoji: '📱' },
@@ -142,11 +181,132 @@ function normalizeIncomingPosition(value) {
     }
     return clamp01(parsed / POSITION_SCALE);
 }
+function normalizeRating(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return 0;
+    }
+    const clamped = Math.min(5, Math.max(0, parsed));
+    return Math.round(clamped * 2) / 2;
+}
+function normalizeLikeCount(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return 0;
+    }
+    return Math.floor(parsed);
+}
+function normalizeBulletinPost(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const source = value;
+    const postId = Number(source.postId);
+    const createdAt = Number(source.createdAt);
+    const dayKey = typeof source.dayKey === 'string' ? source.dayKey : '';
+    const author = typeof source.author === 'string' ? source.author : '';
+    const text = typeof source.text === 'string' ? source.text : '';
+    const imageData = typeof source.imageData === 'string' ? source.imageData : '';
+    if (!dayKey || !author || (!text && !imageData) || !Number.isFinite(postId) || postId < 1 || !Number.isFinite(createdAt) || createdAt <= 0) {
+        return null;
+    }
+    return {
+        dayKey,
+        postId: Math.floor(postId),
+        author,
+        avatarIcon: typeof source.avatarIcon === 'string' && source.avatarIcon.trim() ? source.avatarIcon : '📚',
+        avatarImageData: typeof source.avatarImageData === 'string' ? source.avatarImageData : '',
+        text,
+        imageData,
+        likeCount: normalizeLikeCount(source.likeCount),
+        createdAt: Math.floor(createdAt),
+    };
+}
+function formatRelativeTime(timestamp, nowUtc) {
+    const diffMs = Math.max(0, nowUtc - timestamp);
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) {
+        return 'just now';
+    }
+    if (minutes < 60) {
+        return `${minutes}m ago`;
+    }
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+        return `${hours}h ago`;
+    }
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+function formatRatingLabel(value) {
+    if (value <= 0) {
+        return 'Not rated';
+    }
+    const fixed = Number(value).toFixed(1).replace(/\.0$/, '');
+    return `${fixed} / 5`;
+}
+function renderRatingStars(rating) {
+    const safeRating = normalizeRating(rating);
+    return (_jsx("div", { className: "rating-stars tooltip-rating-stars", "aria-label": `Current rating ${formatRatingLabel(safeRating)}`, "aria-hidden": "true", children: Array.from({ length: 5 }, (_, index) => {
+            const starValue = index + 1;
+            const partialFill = safeRating > index && safeRating < starValue;
+            const fillPercent = partialFill ? ((safeRating - index) * 100) : 0;
+            const filled = safeRating >= starValue;
+            return (_jsx("span", { className: `rating-star ${filled ? 'rating-star-filled' : partialFill ? 'rating-star-half' : 'rating-star-empty'}`, style: partialFill ? { ['--fill-percent']: `${fillPercent}%` } : undefined, children: "\u2605" }, `tooltip-rating-star-${starValue}`));
+        }) }));
+}
+function resizeImageDataUrl(file, options = {}) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            if (!result) {
+                reject(new Error('Image could not be read.'));
+                return;
+            }
+            const image = new Image();
+            image.onload = () => {
+                const targetWidth = Math.max(1, Math.round(options.targetWidth ?? 180));
+                const targetHeight = Math.max(1, Math.round(options.targetHeight ?? 180));
+                const scale = Math.min(targetWidth / image.width, targetHeight / image.height);
+                const width = Math.max(1, Math.round(image.width * scale));
+                const height = Math.max(1, Math.round(image.height * scale));
+                const canvas = document.createElement('canvas');
+                const padded = options.padToBounds !== false;
+                canvas.width = padded ? targetWidth : width;
+                canvas.height = padded ? targetHeight : height;
+                const context = canvas.getContext('2d');
+                if (!context) {
+                    resolve(result);
+                    return;
+                }
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                if (options.backgroundColor && padded) {
+                    context.fillStyle = options.backgroundColor;
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                const offsetX = padded
+                    ? (options.horizontalAlign === 'left' ? 0 : Math.round((targetWidth - width) / 2))
+                    : 0;
+                const offsetY = padded ? Math.round((targetHeight - height) / 2) : 0;
+                context.drawImage(image, offsetX, offsetY, width, height);
+                const outputType = options.outputType ?? (file.type === 'image/png' ? 'image/png' : 'image/jpeg');
+                const quality = Number.isFinite(options.quality) ? Math.min(1, Math.max(0.1, Number(options.quality))) : 0.82;
+                resolve(canvas.toDataURL(outputType, quality));
+            };
+            image.onerror = () => reject(new Error('Image could not be processed.'));
+            image.src = result;
+        };
+        reader.onerror = () => reject(new Error('Image could not be read.'));
+        reader.readAsDataURL(file);
+    });
+}
 function createObserverProfile(username) {
     const books = [
-        { title: 'Observing', author: '—', currentProgress: 0, totalProgress: 0, format: 'physical', progressMode: 'pages' },
-        { title: '', author: '', currentProgress: 0, totalProgress: 0, format: 'physical', progressMode: 'pages' },
-        { title: '', author: '', currentProgress: 0, totalProgress: 0, format: 'physical', progressMode: 'pages' },
+        { title: 'Observing', author: '—', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
+        { title: '', author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
+        { title: '', author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
+        { title: BETWEEN_BOOKS_TITLE, author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
     ];
     return {
         username,
@@ -168,12 +328,26 @@ function createObserverProfile(username) {
     };
 }
 function createDefaultBook(index) {
+    if (index === BETWEEN_BOOKS_INDEX) {
+        return {
+            title: BETWEEN_BOOKS_TITLE,
+            author: '',
+            currentProgress: 0,
+            totalProgress: 0,
+            currentRating: 0,
+            likeCount: 0,
+            format: 'physical',
+            progressMode: 'pages',
+        };
+    }
     if (index === 0) {
         return {
-            title: 'Untitled Beach Read',
-            author: 'Unknown Author',
+            title: '',
+            author: '',
             currentProgress: 1,
             totalProgress: 0,
+            currentRating: 0,
+            likeCount: 0,
             format: 'physical',
             progressMode: 'pages',
         };
@@ -183,6 +357,8 @@ function createDefaultBook(index) {
         author: '',
         currentProgress: 0,
         totalProgress: 0,
+        currentRating: 0,
+        likeCount: 0,
         format: 'physical',
         progressMode: 'pages',
     };
@@ -193,38 +369,58 @@ function normalizeBookFormat(value) {
     }
     return 'physical';
 }
+function normalizeBetweenBooksEntry(book) {
+    return {
+        ...book,
+        title: BETWEEN_BOOKS_TITLE,
+        author: '',
+        currentProgress: 0,
+        totalProgress: 0,
+        currentRating: 0,
+        likeCount: 0,
+        format: 'physical',
+        progressMode: 'pages',
+    };
+}
 function clampBookIndex(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
         return 0;
     }
-    return Math.min(2, Math.max(0, Math.floor(parsed)));
+    return Math.min(BETWEEN_BOOKS_INDEX, Math.max(0, Math.floor(parsed)));
 }
 function normalizeIncomingBooks(profile) {
     const fallbackBook = {
-        title: profile.currentBook || 'Untitled Beach Read',
-        author: profile.currentAuthor || 'Unknown Author',
+        title: profile.currentBook || '',
+        author: profile.currentAuthor || '',
         currentProgress: Math.max(0, Math.floor(Number(profile.currentPage ?? 0))),
         totalProgress: Math.max(0, Math.floor(Number(profile.totalPageCount ?? 0))),
+        currentRating: 0,
+        likeCount: 0,
         format: profile.progressMode === 'audio' ? 'audiobook' : 'physical',
         progressMode: profile.progressMode === 'audio' ? 'audio' : 'pages',
     };
     const sourceBooks = Array.isArray(profile.books) ? profile.books : [];
-    const books = Array.from({ length: 3 }, (_unused, index) => {
+    const books = Array.from({ length: BOOK_SLOT_COUNT }, (_unused, index) => {
         const source = sourceBooks[index];
         const fallback = index === 0 ? fallbackBook : createDefaultBook(index);
         const format = normalizeBookFormat(source?.format ?? fallback.format);
         const progressMode = progressModeForFormat(format);
         const currentProgress = Number(source?.currentProgress ?? fallback.currentProgress ?? 0);
         const totalProgress = Number(source?.totalProgress ?? fallback.totalProgress ?? 0);
-        return {
+        const currentRating = normalizeRating(source?.currentRating ?? fallback.currentRating ?? 0);
+        const likeCount = normalizeLikeCount(source?.likeCount ?? fallback.likeCount ?? 0);
+        const normalizedBook = {
             title: typeof source?.title === 'string' ? source.title : fallback.title,
             author: typeof source?.author === 'string' ? source.author : fallback.author,
             currentProgress: Number.isFinite(currentProgress) && currentProgress >= 0 ? Math.floor(currentProgress) : 0,
             totalProgress: Number.isFinite(totalProgress) && totalProgress >= 0 ? Math.floor(totalProgress) : 0,
+            currentRating,
+            likeCount,
             format,
             progressMode,
         };
+        return index === BETWEEN_BOOKS_INDEX ? normalizeBetweenBooksEntry(normalizedBook) : normalizedBook;
     });
     const currentBookIndex = clampBookIndex(profile.currentBookIndex ?? 0);
     return { books, currentBookIndex };
@@ -234,6 +430,7 @@ function profileToBookDrafts(books) {
         title: book.title,
         author: book.author,
         format: book.format,
+        currentRating: normalizeRating(book.currentRating ?? 0),
         currentProgress: formatProgressInput(book.currentProgress, progressModeForFormat(book.format)),
         totalProgress: formatProgressInput(book.totalProgress, progressModeForFormat(book.format)),
     }));
@@ -298,11 +495,71 @@ function formatProgressDisplay(current, total, mode) {
 function progressLabel(mode) {
     return mode === 'audio' ? 'Time' : 'Page';
 }
+function normalizeLoginTime(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 0;
+    }
+    return parsed;
+}
+function formatReadingDuration(loginTimeUtc, nowUtc) {
+    const safeLoginTimeUtc = normalizeLoginTime(loginTimeUtc);
+    if (!safeLoginTimeUtc) {
+        return '0m';
+    }
+    const elapsedMinutes = Math.max(0, Math.floor((nowUtc - safeLoginTimeUtc) / 60000));
+    if (elapsedMinutes < 60) {
+        return `${elapsedMinutes}m`;
+    }
+    const hours = Math.floor(elapsedMinutes / 60);
+    const minutes = elapsedMinutes % 60;
+    return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
+}
+function buildBookLikeSessionKey(username, bookIndex, book) {
+    const title = typeof book?.title === 'string' ? book.title.trim() : '';
+    const author = typeof book?.author === 'string' ? book.author.trim() : '';
+    const currentProgress = Math.max(0, Math.floor(Number(book?.currentProgress ?? 0)));
+    const totalProgress = Math.max(0, Math.floor(Number(book?.totalProgress ?? 0)));
+    const progressMode = book?.progressMode === 'audio' ? 'audio' : 'pages';
+    return `${username}::${bookIndex}::${title}::${author}::${progressMode}::${currentProgress}/${totalProgress}`;
+}
+function trimAudioBufferEdges(buffer, threshold = 0.008, edgePaddingSeconds = 0.02) {
+    if (buffer.numberOfChannels === 0 || buffer.length === 0) {
+        return buffer;
+    }
+    const channelData = buffer.getChannelData(0);
+    const channelLength = channelData.length;
+    const edgePaddingFrames = Math.max(0, Math.floor(buffer.sampleRate * edgePaddingSeconds));
+    let startIndex = 0;
+    while (startIndex < channelLength && Math.abs(channelData[startIndex]) < threshold) {
+        startIndex += 1;
+    }
+    let endIndex = channelLength - 1;
+    while (endIndex > startIndex && Math.abs(channelData[endIndex]) < threshold) {
+        endIndex -= 1;
+    }
+    if (startIndex === 0 && endIndex === channelLength - 1) {
+        return buffer;
+    }
+    startIndex = Math.max(0, startIndex - edgePaddingFrames);
+    endIndex = Math.min(channelLength - 1, endIndex + edgePaddingFrames);
+    const trimmedLength = Math.max(1, endIndex - startIndex + 1);
+    const trimmedBuffer = new AudioBuffer({
+        length: trimmedLength,
+        numberOfChannels: buffer.numberOfChannels,
+        sampleRate: buffer.sampleRate,
+    });
+    for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex += 1) {
+        const sourceChannel = buffer.getChannelData(channelIndex);
+        trimmedBuffer.getChannelData(channelIndex).set(sourceChannel.subarray(startIndex, endIndex + 1));
+    }
+    return trimmedBuffer;
+}
 function App() {
     const [username, setUsername] = useState('');
     const [profile, setProfile] = useState(null);
     const [profileForm, setProfileForm] = useState({
-        books: profileToBookDrafts([createDefaultBook(0), createDefaultBook(1), createDefaultBook(2)]),
+        books: profileToBookDrafts([createDefaultBook(0), createDefaultBook(1), createDefaultBook(2), createDefaultBook(3)]),
         editingBookIndex: 0,
         favoriteAuthors: '',
         backgroundScene: 'ocean-beach',
@@ -313,18 +570,54 @@ function App() {
     const [statusText, setStatusText] = useState('Reading');
     const [scenePreview, setScenePreview] = useState('ocean-beach');
     const [avatarIconDraft, setAvatarIconDraft] = useState('📚');
+    const [avatarImageData, setAvatarImageData] = useState('');
+    const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
     const [hoveredReaderUsername, setHoveredReaderUsername] = useState(null);
+    const [pinnedReaderUsername, setPinnedReaderUsername] = useState(null);
     const [announcementMessage, setAnnouncementMessage] = useState('');
     const [otherReaders, setOtherReaders] = useState([]);
     const [activeReaderLimit, setActiveReaderLimit] = useState(10);
     const [observerCount, setObserverCount] = useState(0);
+    const [isStatsCollapsed, setIsStatsCollapsed] = useState(true);
+    const [dailyVisits, setDailyVisits] = useState(0);
+    const [dailyUsers, setDailyUsers] = useState(0);
+    const [totalReadingMinutes, setTotalReadingMinutes] = useState(0);
+    const [isProfileCollapsed, setIsProfileCollapsed] = useState(false);
     const [loginMode, setLoginMode] = useState('reader');
+    const [browserNow, setBrowserNow] = useState(Date.now());
+    const [likedBookSessionKeys, setLikedBookSessionKeys] = useState(new Set());
+    const [pendingLikeKey, setPendingLikeKey] = useState(null);
+    const [bulletinPosts, setBulletinPosts] = useState([]);
+    const [bulletinDraft, setBulletinDraft] = useState('');
+    const [bulletinImageDraft, setBulletinImageDraft] = useState('');
+    const [isPostingBulletin, setIsPostingBulletin] = useState(false);
+    const [isBulletinCollapsed, setIsBulletinCollapsed] = useState(false);
+    const [expandedBulletinImage, setExpandedBulletinImage] = useState(null);
+    const [pendingBulletinLikeKey, setPendingBulletinLikeKey] = useState(null);
+    const [pendingBulletinDeleteKey, setPendingBulletinDeleteKey] = useState(null);
+    const [likedBulletinSessionKeys, setLikedBulletinSessionKeys] = useState(new Set());
+    const [isForestSoundEnabled, setIsForestSoundEnabled] = useState(false);
+    const [isRainSoundEnabled, setIsRainSoundEnabled] = useState(false);
+    const [isSceneImmersive, setIsSceneImmersive] = useState(false);
+    const [isSceneNativeFullscreen, setIsSceneNativeFullscreen] = useState(false);
     const sceneRef = useRef(null);
     const sceneSizeRef = useRef(null);
+    const forestAudioContextRef = useRef(null);
+    const forestAudioSourceRef = useRef(null);
+    const forestAudioBufferRef = useRef(null);
+    const rainAudioContextRef = useRef(null);
+    const rainAudioSourceRef = useRef(null);
+    const rainAudioBufferRef = useRef(null);
     const profileRef = useRef(null);
+    const profileFormRef = useRef(profileForm);
+    const statusTextRef = useRef(statusText);
+    const avatarIconDraftRef = useRef(avatarIconDraft);
+    const avatarImageDataRef = useRef(avatarImageData);
     const pollVersionRef = useRef(0);
     const suppressProfileStateRef = useRef(false);
     const sessionVersionRef = useRef(0);
+    const likeStorageKey = profile?.username ? `vwr-liked-books:${profile.username}` : null;
+    const bulletinLikeStorageKey = profile?.username ? `vwr-liked-bulletin:${profile.username}` : null;
     useEffect(() => {
         const storedName = localStorage.getItem('vwr-username');
         const storedMode = localStorage.getItem('vwr-login-mode');
@@ -347,6 +640,7 @@ function App() {
             if (storedMode === 'observer') {
                 void loadProfile(storedName).then((result) => {
                     if (result.joined) {
+                        void registerDailyVisit(storedName);
                         return;
                     }
                     if (result.reason === 'active-limit') {
@@ -364,11 +658,16 @@ function App() {
                         localStorage.setItem('vwr-login-mode', 'observer');
                         void loadOtherReaders(storedName);
                         void loadObserverCount();
+                        void registerDailyVisit(storedName);
                     }
                 });
             }
             else {
-                void loadProfile(storedName);
+                void loadProfile(storedName).then((result) => {
+                    if (result.joined) {
+                        void registerDailyVisit(storedName);
+                    }
+                });
             }
         }
         if (storedPosition) {
@@ -386,6 +685,92 @@ function App() {
         profileRef.current = profile;
     }, [profile]);
     useEffect(() => {
+        if (!profile) {
+            setPinnedReaderUsername(null);
+            setHoveredReaderUsername(null);
+        }
+    }, [profile]);
+    useEffect(() => {
+        profileFormRef.current = profileForm;
+    }, [profileForm]);
+    useEffect(() => {
+        statusTextRef.current = statusText;
+    }, [statusText]);
+    useEffect(() => {
+        avatarIconDraftRef.current = avatarIconDraft;
+    }, [avatarIconDraft]);
+    useEffect(() => {
+        avatarImageDataRef.current = avatarImageData;
+    }, [avatarImageData]);
+    useEffect(() => {
+        if (!profile?.username || profile.isObserver || !likeStorageKey) {
+            setLikedBookSessionKeys(new Set());
+            return;
+        }
+        const raw = window.sessionStorage.getItem(likeStorageKey);
+        if (!raw) {
+            setLikedBookSessionKeys(new Set());
+            return;
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                const next = new Set();
+                for (const entry of parsed) {
+                    if (typeof entry === 'string' && entry) {
+                        next.add(entry);
+                    }
+                }
+                setLikedBookSessionKeys(next);
+                return;
+            }
+        }
+        catch {
+            // ignore malformed session storage payload
+        }
+        setLikedBookSessionKeys(new Set());
+    }, [profile?.username, profile?.isObserver, likeStorageKey]);
+    useEffect(() => {
+        if (!profile?.username || profile.isObserver || !likeStorageKey) {
+            return;
+        }
+        window.sessionStorage.setItem(likeStorageKey, JSON.stringify(Array.from(likedBookSessionKeys)));
+    }, [likedBookSessionKeys, profile?.username, profile?.isObserver, likeStorageKey]);
+    useEffect(() => {
+        if (!profile?.username || !bulletinLikeStorageKey) {
+            setLikedBulletinSessionKeys(new Set());
+            return;
+        }
+        const raw = window.sessionStorage.getItem(bulletinLikeStorageKey);
+        if (!raw) {
+            setLikedBulletinSessionKeys(new Set());
+            return;
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                const next = new Set();
+                for (const entry of parsed) {
+                    if (typeof entry === 'string' && entry) {
+                        next.add(entry);
+                    }
+                }
+                setLikedBulletinSessionKeys(next);
+                return;
+            }
+        }
+        catch {
+            // ignore malformed payload
+        }
+        setLikedBulletinSessionKeys(new Set());
+    }, [profile?.username, bulletinLikeStorageKey]);
+    useEffect(() => {
+        if (!profile?.username || !bulletinLikeStorageKey) {
+            return;
+        }
+        window.sessionStorage.setItem(bulletinLikeStorageKey, JSON.stringify(Array.from(likedBulletinSessionKeys)));
+    }, [likedBulletinSessionKeys, profile?.username, bulletinLikeStorageKey]);
+    useEffect(() => {
         if (profile) {
             const { books, currentBookIndex } = normalizeIncomingBooks(profile);
             setProfileForm((current) => ({
@@ -398,6 +783,7 @@ function App() {
             setStatusText(profile.status || 'Reading');
             setScenePreview(profile.backgroundScene || 'ocean-beach');
             setAvatarIconDraft((current) => current === '📚' ? (profile.avatarIcon || '📚') : current);
+            setAvatarImageData(profile.avatarImageData || '');
             const nextPosition = toRenderedPosition(profile.positionX, profile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520);
             setAvatarPosition(nextPosition);
         }
@@ -420,6 +806,11 @@ function App() {
     useEffect(() => {
         void loadActiveReaderLimit();
         void loadObserverCount();
+        void loadDailyStats();
+        const tick = () => setBrowserNow(Date.now());
+        tick();
+        const interval = window.setInterval(tick, 30000);
+        return () => window.clearInterval(interval);
     }, []);
     useEffect(() => {
         if (profile) {
@@ -540,6 +931,59 @@ function App() {
         }
     }, [profile, error]);
     useEffect(() => {
+        if (profile) {
+            return;
+        }
+        setIsSceneImmersive(false);
+        setIsSceneNativeFullscreen(false);
+    }, [profile]);
+    useEffect(() => {
+        const fullscreenDocument = document;
+        const syncFullscreenState = () => {
+            const sceneElement = sceneRef.current;
+            const isNativeFullscreen = !!sceneElement
+                && (document.fullscreenElement === sceneElement || fullscreenDocument.webkitFullscreenElement === sceneElement);
+            setIsSceneNativeFullscreen(isNativeFullscreen);
+            if (!isNativeFullscreen) {
+                setIsSceneImmersive(false);
+            }
+        };
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape' && isSceneImmersive && !isSceneNativeFullscreen) {
+                setIsSceneImmersive(false);
+            }
+        };
+        document.addEventListener('fullscreenchange', syncFullscreenState);
+        document.addEventListener('webkitfullscreenchange', syncFullscreenState);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('fullscreenchange', syncFullscreenState);
+            document.removeEventListener('webkitfullscreenchange', syncFullscreenState);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isSceneImmersive, isSceneNativeFullscreen]);
+    useEffect(() => {
+        const isSceneExpanded = isSceneImmersive || isSceneNativeFullscreen;
+        document.body.classList.toggle('scene-immersive-body', isSceneExpanded);
+        return () => {
+            document.body.classList.remove('scene-immersive-body');
+        };
+    }, [isSceneImmersive, isSceneNativeFullscreen]);
+    useEffect(() => {
+        if (!expandedBulletinImage) {
+            return;
+        }
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setExpandedBulletinImage(null);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [expandedBulletinImage]);
+    useEffect(() => {
         if (!profile)
             return;
         if (profile.isObserver) {
@@ -552,40 +996,64 @@ function App() {
                 unregister();
             };
         }
-        const markInactiveOnUnload = () => {
-            const currentProfile = profileRef.current ?? profile;
-            if (!currentProfile || currentProfile.isObserver) {
-                return;
-            }
-            const path = apiUrl(`/api/profile/${encodeURIComponent(currentProfile.username)}/deactivate`);
-            const payload = JSON.stringify({ username: currentProfile.username });
+        return undefined;
+    }, [profile?.username, profile?.isObserver]);
+    useEffect(() => {
+        if (!profile || profile.isObserver) {
+            return undefined;
+        }
+        const deactivateOnUnload = () => {
+            const endpoint = apiUrl(`/api/profile/${encodeURIComponent(profile.username)}/deactivate`);
             try {
                 if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-                    const body = new Blob([payload], { type: 'application/json' });
-                    if (navigator.sendBeacon(path, body)) {
-                        return;
-                    }
+                    const payload = new Blob(['{}'], { type: 'application/json' });
+                    navigator.sendBeacon(endpoint, payload);
+                    return;
                 }
+                void fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: '{}',
+                    keepalive: true,
+                });
             }
             catch {
-                // Fall back to keepalive fetch if beacon is unavailable.
+                // Ignore unload-time network failures; inactivity fallback still applies server-side.
             }
-            void fetch(path, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: payload,
-                keepalive: true,
-            }).catch(() => undefined);
         };
-        window.addEventListener('pagehide', markInactiveOnUnload);
-        window.addEventListener('beforeunload', markInactiveOnUnload);
+        window.addEventListener('beforeunload', deactivateOnUnload);
         return () => {
-            window.removeEventListener('pagehide', markInactiveOnUnload);
-            window.removeEventListener('beforeunload', markInactiveOnUnload);
+            window.removeEventListener('beforeunload', deactivateOnUnload);
         };
     }, [profile?.username, profile?.isObserver]);
+    const syncLoginTimestampIfNeeded = async (nextProfile) => {
+        if (!nextProfile || nextProfile.isObserver) {
+            return;
+        }
+        if (normalizeLoginTime(nextProfile.loginTimeUtc) > 0) {
+            return;
+        }
+        const loginTimeUtc = Date.now();
+        try {
+            const response = await fetch(apiUrl(`/api/profile/${encodeURIComponent(nextProfile.username)}?ts=${Date.now()}`), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    loginTimeUtc,
+                    isActive: true,
+                }),
+            });
+            const data = await response.json().catch(() => null);
+            if (response.ok && data?.loginTimeUtc !== undefined) {
+                setProfile((current) => (current ? { ...current, loginTimeUtc: Number(data.loginTimeUtc) } : current));
+            }
+        }
+        catch {
+            // ignore login timestamp sync failures for now; the app still shows the active reader.
+        }
+    };
     const loadProfile = (name) => {
         const sessionVersion = ++sessionVersionRef.current;
         setLoading(true);
@@ -632,7 +1100,11 @@ function App() {
                 progressMode: selectedBook?.progressMode ?? data.progressMode,
                 isObserver: false,
             };
-            setProfile((current) => (current ? { ...current, ...normalizedProfile, avatarIcon: data.avatarIcon || current.avatarIcon } : normalizedProfile));
+            setProfile((current) => (current ? { ...current, ...normalizedProfile, avatarIcon: data.avatarIcon || current.avatarIcon, avatarImageData: data.avatarImageData || current.avatarImageData || '' } : { ...normalizedProfile, avatarImageData: data.avatarImageData || '' }));
+            setAvatarImageData(data.avatarImageData || '');
+            if (normalizeLoginTime(data.loginTimeUtc) === 0) {
+                void syncLoginTimestampIfNeeded(normalizedProfile);
+            }
             if (data.positionX !== undefined && data.positionY !== undefined) {
                 const normalizedX = normalizeIncomingPosition(data.positionX);
                 const normalizedY = normalizeIncomingPosition(data.positionY);
@@ -677,9 +1149,78 @@ function App() {
         })
             .catch(() => undefined);
     };
+    const loadDailyStats = () => {
+        fetch(apiUrl(`/api/stats/daily?ts=${Date.now()}`), { cache: 'no-store' })
+            .then((res) => res.json())
+            .then((data) => {
+            if (typeof data?.dailyVisits === 'number' && Number.isFinite(data.dailyVisits) && data.dailyVisits >= 0) {
+                setDailyVisits(Math.floor(data.dailyVisits));
+            }
+            if (typeof data?.dailyUsers === 'number' && Number.isFinite(data.dailyUsers) && data.dailyUsers >= 0) {
+                setDailyUsers(Math.floor(data.dailyUsers));
+            }
+            if (typeof data?.totalReadingMinutes === 'number' && Number.isFinite(data.totalReadingMinutes) && data.totalReadingMinutes >= 0) {
+                setTotalReadingMinutes(Math.floor(data.totalReadingMinutes));
+            }
+            if (typeof data?.activeReaderLimit === 'number' && Number.isFinite(data.activeReaderLimit) && data.activeReaderLimit > 0) {
+                setActiveReaderLimit(Math.floor(data.activeReaderLimit));
+            }
+            if (typeof data?.observers === 'number' && Number.isFinite(data.observers) && data.observers >= 0) {
+                setObserverCount(Math.floor(data.observers));
+            }
+        })
+            .catch(() => undefined);
+    };
+    const registerDailyVisit = async (name) => {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            return;
+        }
+        try {
+            const response = await fetch(apiUrl(`/api/stats/visit?ts=${Date.now()}`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username: trimmedName }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                return;
+            }
+            if (typeof data?.dailyVisits === 'number' && Number.isFinite(data.dailyVisits) && data.dailyVisits >= 0) {
+                setDailyVisits(Math.floor(data.dailyVisits));
+            }
+            if (typeof data?.dailyUsers === 'number' && Number.isFinite(data.dailyUsers) && data.dailyUsers >= 0) {
+                setDailyUsers(Math.floor(data.dailyUsers));
+            }
+            if (typeof data?.totalReadingMinutes === 'number' && Number.isFinite(data.totalReadingMinutes) && data.totalReadingMinutes >= 0) {
+                setTotalReadingMinutes(Math.floor(data.totalReadingMinutes));
+            }
+        }
+        catch {
+            // ignore analytics failures so login flow is unaffected
+        }
+    };
+    const loadBulletinPosts = () => {
+        fetch(apiUrl(`/api/bulletin/posts?ts=${Date.now()}`), { cache: 'no-store' })
+            .then((res) => res.json())
+            .then((data) => {
+            if (!Array.isArray(data)) {
+                return;
+            }
+            const normalized = data
+                .map((entry) => normalizeBulletinPost(entry))
+                .filter((entry) => Boolean(entry));
+            setBulletinPosts(normalized);
+        })
+            .catch(() => undefined);
+    };
     const refreshSceneData = (usernameOverride) => {
         void loadActiveReaderLimit();
         void loadObserverCount();
+        void loadDailyStats();
+        void loadBulletinPosts();
         const attempts = [0, 150, 400, 1000];
         attempts.forEach((delay, index) => {
             window.setTimeout(() => {
@@ -778,8 +1319,9 @@ function App() {
             return null;
         }
     };
-    const persistProfile = async (overrides = {}) => {
+    const persistProfile = async (overrides = {}, mode = 'all') => {
         const currentProfile = profileRef.current ?? profile;
+        const currentProfileForm = profileFormRef.current;
         if (!currentProfile)
             return null;
         if (currentProfile.isObserver) {
@@ -796,38 +1338,85 @@ function App() {
             return null;
         }
         const sessionVersion = sessionVersionRef.current;
+        const shouldSendBooks = mode === 'all' || mode === 'books';
+        const shouldSendStatus = mode === 'all' || mode === 'status';
+        const shouldSendFullProfile = mode === 'all';
         const normalizedBooks = [];
-        for (let index = 0; index < profileForm.books.length; index += 1) {
-            const draft = profileForm.books[index];
-            const mode = progressModeForFormat(draft.format);
-            const currentProgress = parseDraftProgress(draft.currentProgress, mode);
-            const totalProgress = parseDraftProgress(draft.totalProgress, mode);
-            if (currentProgress === null || totalProgress === null) {
-                setError(mode === 'audio'
-                    ? `Book ${index + 1} progress must be minutes or h/m format (e.g. 5h5m).`
-                    : `Book ${index + 1} progress must be a valid non-negative page count.`);
-                return null;
+        let safeCurrentBookIndex = clampBookIndex(currentProfileForm.editingBookIndex);
+        let selectedBook = currentProfile.books?.[safeCurrentBookIndex] ?? currentProfile.books?.[0];
+        if (shouldSendBooks) {
+            for (let index = 0; index < currentProfileForm.books.length; index += 1) {
+                const draft = currentProfileForm.books[index];
+                if (index === BETWEEN_BOOKS_INDEX) {
+                    normalizedBooks.push(normalizeBetweenBooksEntry(createDefaultBook(BETWEEN_BOOKS_INDEX)));
+                    continue;
+                }
+                const draftMode = progressModeForFormat(draft.format);
+                const currentProgress = parseDraftProgress(draft.currentProgress, draftMode);
+                const totalProgress = parseDraftProgress(draft.totalProgress, draftMode);
+                if (currentProgress === null || totalProgress === null) {
+                    const slotLabel = BOOK_SLOT_OPTIONS.find((slot) => slot.index === index)?.label || `Book ${index + 1}`;
+                    setError(draftMode === 'audio'
+                        ? `${slotLabel} progress must be minutes or h/m format (e.g. 5h5m).`
+                        : `${slotLabel} progress must be a valid non-negative page count.`);
+                    return null;
+                }
+                normalizedBooks.push({
+                    title: draft.title,
+                    author: draft.author,
+                    currentRating: normalizeRating(draft.currentRating ?? 0),
+                    likeCount: normalizeLikeCount(currentProfile.books?.[index]?.likeCount ?? 0),
+                    format: draft.format,
+                    progressMode: draftMode,
+                    currentProgress,
+                    totalProgress,
+                });
             }
-            normalizedBooks.push({
-                title: draft.title,
-                author: draft.author,
-                format: draft.format,
-                progressMode: mode,
-                currentProgress,
-                totalProgress,
-            });
+            safeCurrentBookIndex = clampBookIndex(currentProfileForm.editingBookIndex);
+            selectedBook = normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
         }
-        const safeCurrentBookIndex = safeEditingBookIndex;
-        const selectedBook = normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
-        const favoriteAuthors = profileForm.favoriteAuthors
+        const favoriteAuthors = currentProfileForm.favoriteAuthors
             .split(',')
             .map((name) => name.trim())
             .filter(Boolean);
-        const nextStatus = statusText.trim() || 'Reading';
-        const nextAvatarIcon = overrides.avatarIcon ?? avatarIconDraft ?? currentProfile.avatarIcon ?? '📚';
+        const nextStatus = statusTextRef.current.trim() || 'Reading';
+        const latestAvatarImageData = avatarImageDataRef.current;
+        const draftAvatarImageData = typeof latestAvatarImageData === 'string' ? latestAvatarImageData : currentProfile.avatarImageData || '';
+        const nextAvatarIcon = overrides.avatarIcon ?? avatarIconDraftRef.current ?? currentProfile.avatarIcon ?? '📚';
+        const nextAvatarImageData = draftAvatarImageData;
         const sceneWidth = sceneRef.current?.clientWidth ?? 640;
         const sceneHeight = sceneRef.current?.clientHeight ?? 520;
         const normalizedAvatarPosition = toStoredPosition(avatarPosition, sceneWidth, sceneHeight);
+        const payload = {};
+        if (shouldSendBooks) {
+            payload.books = normalizedBooks;
+            payload.currentBookIndex = safeCurrentBookIndex;
+            payload.currentBook = selectedBook?.title ?? currentProfile.currentBook;
+            payload.currentAuthor = selectedBook?.author ?? currentProfile.currentAuthor;
+            payload.currentPage = selectedBook?.currentProgress ?? currentProfile.currentPage;
+            payload.totalPageCount = selectedBook?.totalProgress ?? currentProfile.totalPageCount;
+            payload.progressMode = selectedBook?.progressMode ?? currentProfile.progressMode;
+        }
+        if (shouldSendStatus) {
+            payload.status = nextStatus;
+        }
+        if (shouldSendFullProfile) {
+            payload.favoriteAuthors = favoriteAuthors;
+            payload.backgroundScene = currentProfileForm.backgroundScene || currentProfile.backgroundScene || 'ocean-beach';
+            payload.avatarIcon = nextAvatarIcon;
+            payload.avatarImageData = nextAvatarImageData;
+            payload.positionX = overrides.positionX !== undefined ? overrides.positionX : normalizedAvatarPosition.x;
+            payload.positionY = overrides.positionY !== undefined ? overrides.positionY : normalizedAvatarPosition.y;
+        }
+        if (overrides.positionX !== undefined) {
+            payload.positionX = overrides.positionX;
+        }
+        if (overrides.positionY !== undefined) {
+            payload.positionY = overrides.positionY;
+        }
+        if (overrides.isActive !== undefined) {
+            payload.isActive = overrides.isActive;
+        }
         setLoading(true);
         setError('');
         try {
@@ -836,26 +1425,11 @@ function App() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    books: normalizedBooks,
-                    currentBookIndex: safeCurrentBookIndex,
-                    currentBook: selectedBook?.title ?? currentProfile.currentBook,
-                    currentAuthor: selectedBook?.author ?? currentProfile.currentAuthor,
-                    currentPage: selectedBook?.currentProgress ?? currentProfile.currentPage,
-                    totalPageCount: selectedBook?.totalProgress ?? currentProfile.totalPageCount,
-                    progressMode: selectedBook?.progressMode ?? currentProfile.progressMode,
-                    favoriteAuthors,
-                    status: nextStatus,
-                    backgroundScene: profileForm.backgroundScene || currentProfile.backgroundScene || 'ocean-beach',
-                    avatarIcon: nextAvatarIcon,
-                    ...(overrides.isActive !== undefined ? { isActive: overrides.isActive } : {}),
-                    positionX: overrides.positionX !== undefined ? overrides.positionX : normalizedAvatarPosition.x,
-                    positionY: overrides.positionY !== undefined ? overrides.positionY : normalizedAvatarPosition.y,
-                }),
+                body: JSON.stringify(payload),
             });
             const data = await response.json().catch(() => null);
             if (!response.ok) {
-                setError(data?.error || 'Unable to save profile.');
+                setError(data?.error || 'Unable to update profile.');
                 if (overrides.isActive === true || currentProfile.isActive === false) {
                     setProfile(null);
                     setHoveredReaderUsername(null);
@@ -877,9 +1451,12 @@ function App() {
                 suppressProfileStateRef.current = false;
                 return data;
             }
-            const savedScene = data?.backgroundScene || profileForm.backgroundScene || currentProfile.backgroundScene || 'ocean-beach';
+            const savedScene = data?.backgroundScene || currentProfileForm.backgroundScene || currentProfile.backgroundScene || 'ocean-beach';
             const normalizedIncoming = normalizeIncomingBooks(data);
             const savedBook = normalizedIncoming.books[normalizedIncoming.currentBookIndex] ?? normalizedIncoming.books[0];
+            const persistedAvatarImageData = typeof data?.avatarImageData === 'string'
+                ? data.avatarImageData
+                : (draftAvatarImageData ?? currentProfile.avatarImageData ?? '');
             setProfile((current) => {
                 const merged = {
                     ...(current ?? {}),
@@ -892,20 +1469,31 @@ function App() {
                     totalPageCount: savedBook?.totalProgress ?? data?.totalPageCount,
                     progressMode: savedBook?.progressMode ?? data?.progressMode,
                     backgroundScene: savedScene,
+                    avatarImageData: persistedAvatarImageData,
                 };
                 return {
                     ...merged,
-                    avatarIcon: data.avatarIcon || current?.avatarIcon || merged.avatarIcon,
+                    avatarIcon: data.avatarIcon || nextAvatarIcon || current?.avatarIcon || merged.avatarIcon,
                 };
             });
-            setAvatarIconDraft(data?.avatarIcon || nextAvatarIcon || currentProfile.avatarIcon || '📚');
-            setProfileForm((current) => ({
-                ...current,
-                books: profileToBookDrafts(normalizedIncoming.books),
-                editingBookIndex: normalizedIncoming.currentBookIndex,
-                backgroundScene: savedScene,
-            }));
-            setScenePreview(savedScene);
+            if (shouldSendFullProfile) {
+                setAvatarIconDraft(data?.avatarIcon || nextAvatarIcon || currentProfile.avatarIcon || '📚');
+                setAvatarImageData(persistedAvatarImageData);
+                setProfileForm((current) => ({
+                    ...current,
+                    books: profileToBookDrafts(normalizedIncoming.books),
+                    editingBookIndex: normalizedIncoming.currentBookIndex,
+                    backgroundScene: savedScene,
+                }));
+                setScenePreview(savedScene);
+            }
+            else if (shouldSendBooks) {
+                setProfileForm((current) => ({
+                    ...current,
+                    books: profileToBookDrafts(normalizedIncoming.books),
+                    editingBookIndex: normalizedIncoming.currentBookIndex,
+                }));
+            }
             loadOtherReaders();
             return data;
         }
@@ -922,6 +1510,18 @@ function App() {
         if (!profile)
             return;
         await persistProfile();
+    };
+    const saveStatusAndMood = async () => {
+        if (!profile || profile.isObserver) {
+            return;
+        }
+        await persistProfile({}, 'status');
+    };
+    const saveBookInformation = async () => {
+        if (!profile || profile.isObserver) {
+            return;
+        }
+        await persistProfile({}, 'books');
     };
     const handleLeave = async () => {
         if (!profile)
@@ -943,11 +1543,13 @@ function App() {
             void unregisterObserver(leavingProfile.username);
             return;
         }
-        const normalizedBooks = profileForm.books.map((draft) => {
+        const normalizedBooks = profileForm.books.map((draft, index) => {
             const mode = progressModeForFormat(draft.format);
             return {
                 title: draft.title,
                 author: draft.author,
+                currentRating: normalizeRating(draft.currentRating ?? 0),
+                likeCount: normalizeLikeCount(profile.books?.[index]?.likeCount ?? 0),
                 format: draft.format,
                 progressMode: mode,
                 currentProgress: parseDraftProgress(draft.currentProgress, mode) ?? 0,
@@ -994,6 +1596,7 @@ function App() {
                 backgroundScene: profileForm.backgroundScene || leavingProfile.backgroundScene || 'ocean-beach',
                 avatarIcon: leavingProfile.avatarIcon,
                 isActive: false,
+                loginTimeUtc: 0,
             }),
         }).catch(() => undefined);
     };
@@ -1013,6 +1616,9 @@ function App() {
         setError('');
         try {
             const loginResult = await loadProfile(trimmed);
+            if (loginResult.joined) {
+                void registerDailyVisit(trimmed);
+            }
             if (!loginResult.joined && loginResult.reason === 'active-limit') {
                 const observerProfile = createObserverProfile(trimmed);
                 setProfile(observerProfile);
@@ -1028,6 +1634,7 @@ function App() {
                 localStorage.setItem('vwr-login-mode', 'observer');
                 setError('The active reader limit has been reached. You are joining as an observer.');
                 void registerObserver(trimmed);
+                void registerDailyVisit(trimmed);
                 refreshSceneData(trimmed);
             }
         }
@@ -1037,40 +1644,332 @@ function App() {
     };
     const handleAvatarMouseEnter = (username) => {
         if (typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            if (pinnedReaderUsername && pinnedReaderUsername !== username) {
+                return;
+            }
             setHoveredReaderUsername(username);
         }
     };
     const handleAvatarMouseLeave = (username) => {
         if (typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            if (pinnedReaderUsername === username) {
+                return;
+            }
             setHoveredReaderUsername((current) => (current === username ? null : current));
         }
     };
     const handleAvatarClick = (event, username) => {
         event.preventDefault();
         event.stopPropagation();
-        setHoveredReaderUsername((current) => (current === username ? null : username));
+        setPinnedReaderUsername((currentPinned) => {
+            const nextPinned = currentPinned === username ? null : username;
+            setHoveredReaderUsername(nextPinned);
+            return nextPinned;
+        });
     };
+    const activeTooltipUsername = pinnedReaderUsername ?? hoveredReaderUsername;
+    const isSceneExpanded = isSceneImmersive || isSceneNativeFullscreen;
     const safeEditingBookIndex = clampBookIndex(profileForm.editingBookIndex);
+    const activeReaderCount = profile?.isObserver ? otherReaders.length : otherReaders.length + 1;
+    const isEditingBetweenBooks = safeEditingBookIndex === BETWEEN_BOOKS_INDEX;
     const editingBook = profileForm.books[safeEditingBookIndex] ?? profileForm.books[0] ?? {
         title: '',
         author: '',
         format: 'physical',
+        currentRating: 0,
         currentProgress: '0',
         totalProgress: '0',
     };
     const editingBookMode = progressModeForFormat(editingBook?.format ?? 'physical');
-    const currentBookSlotLabels = profileForm.books.map((book, index) => {
-        const label = book.title.trim() || `Book ${index + 1}`;
-        return `Book ${index + 1}: ${label}`;
+    const currentBookSlotLabels = BOOK_SLOT_OPTIONS.map((slot) => {
+        if (slot.index === BETWEEN_BOOKS_INDEX) {
+            return BETWEEN_BOOKS_TITLE;
+        }
+        const book = profileForm.books[slot.index];
+        const label = book?.title?.trim() || slot.label;
+        return `${slot.label}: ${label}`;
     });
     const selectedScene = profileForm.backgroundScene || scenePreview;
     const selectedSceneOption = SCENE_OPTIONS.find((option) => option.value === selectedScene) ?? SCENE_OPTIONS[0];
+    const isForestScene = selectedSceneOption.value === 'lush-forest';
+    const isRainScene = selectedSceneOption.value === 'rain';
     const announcementVariant = announcementVariantForScene(selectedSceneOption.value);
     const announcementDateLabel = formatLocalAnnouncementDate();
     const scenePanelBackgroundImage = `${import.meta.env.BASE_URL}${selectedSceneOption.imagePath}`;
     const scenePanelOverlay = selectedSceneOption.overlay;
     const sceneWidth = sceneRef.current?.clientWidth ?? 640;
     const currentTooltipClassName = tooltipPlacementClass(getTooltipPlacement(avatarPosition, sceneWidth));
+    const currentRatingValue = normalizeRating(editingBook.currentRating ?? 0);
+    const ratingSliderStyle = {
+        ['--rating-fill']: `${(currentRatingValue / 5) * 100}%`,
+    };
+    const renderAvatarContent = (reader, fallbackIcon = '📚') => {
+        const hasCustomImage = typeof reader.avatarImageData === 'string' && reader.avatarImageData.trim().length > 0;
+        if (hasCustomImage) {
+            return _jsx("img", { className: "avatar-image", src: reader.avatarImageData, alt: "" });
+        }
+        return _jsx("span", { role: "img", "aria-label": "reader", children: reader.avatarIcon || fallbackIcon });
+    };
+    const renderReadingTimeBadge = (reader) => {
+        if (reader.isObserver || !reader.loginTimeUtc || reader.loginTimeUtc <= 0) {
+            return null;
+        }
+        return _jsx("span", { className: "reader-time-badge", children: formatReadingDuration(reader.loginTimeUtc, browserNow) });
+    };
+    const mergeIncomingReaderProfile = (currentReader, incoming) => {
+        const normalizedIncoming = normalizeIncomingBooks(incoming);
+        const safeBookIndex = clampBookIndex(normalizedIncoming.currentBookIndex);
+        const selectedBook = normalizedIncoming.books[safeBookIndex] ?? normalizedIncoming.books[0];
+        return {
+            ...currentReader,
+            ...incoming,
+            books: normalizedIncoming.books,
+            currentBookIndex: safeBookIndex,
+            currentBook: selectedBook?.title ?? currentReader.currentBook,
+            currentAuthor: selectedBook?.author ?? currentReader.currentAuthor,
+            currentPage: selectedBook?.currentProgress ?? currentReader.currentPage,
+            totalPageCount: selectedBook?.totalProgress ?? currentReader.totalPageCount,
+            progressMode: selectedBook?.progressMode ?? currentReader.progressMode,
+            positionX: incoming.positionX !== undefined ? normalizeIncomingPosition(incoming.positionX) : currentReader.positionX,
+            positionY: incoming.positionY !== undefined ? normalizeIncomingPosition(incoming.positionY) : currentReader.positionY,
+        };
+    };
+    const toggleBulletinPostLike = async (event, post) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const sessionKey = `${post.dayKey}:${post.postId}`;
+        const alreadyLiked = likedBulletinSessionKeys.has(sessionKey);
+        if (pendingBulletinLikeKey === sessionKey) {
+            return;
+        }
+        setPendingBulletinLikeKey(sessionKey);
+        try {
+            const response = await fetch(apiUrl(`/api/bulletin/posts/${post.postId}/like?ts=${Date.now()}`), {
+                method: alreadyLiked ? 'DELETE' : 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                setError(data?.error || 'Unable to update bulletin like right now.');
+                return;
+            }
+            const normalized = normalizeBulletinPost(data);
+            if (!normalized) {
+                return;
+            }
+            setBulletinPosts((current) => current.map((entry) => (entry.dayKey === normalized.dayKey && entry.postId === normalized.postId ? normalized : entry)));
+            setLikedBulletinSessionKeys((current) => {
+                const next = new Set(current);
+                if (alreadyLiked) {
+                    next.delete(sessionKey);
+                }
+                else {
+                    next.add(sessionKey);
+                }
+                return next;
+            });
+        }
+        catch {
+            setError('Unable to reach backend.');
+        }
+        finally {
+            setPendingBulletinLikeKey((current) => (current === sessionKey ? null : current));
+        }
+    };
+    const submitBulletinPost = async (event) => {
+        event.preventDefault();
+        if (!profile) {
+            return;
+        }
+        const text = bulletinDraft.trim();
+        if (!text && !bulletinImageDraft) {
+            return;
+        }
+        setIsPostingBulletin(true);
+        try {
+            const response = await fetch(apiUrl(`/api/bulletin/posts?ts=${Date.now()}`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    author: profile.username,
+                    avatarIcon: profile.avatarIcon,
+                    avatarImageData: profile.avatarImageData || '',
+                    text,
+                    imageData: bulletinImageDraft,
+                }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                setError(data?.error || 'Unable to post bulletin entry.');
+                return;
+            }
+            const normalized = normalizeBulletinPost(data);
+            if (!normalized) {
+                setError('Unable to post bulletin entry.');
+                return;
+            }
+            setBulletinDraft('');
+            setBulletinImageDraft('');
+            setBulletinPosts((current) => [normalized, ...current.filter((entry) => !(entry.dayKey === normalized.dayKey && entry.postId === normalized.postId))]);
+        }
+        catch {
+            setError('Unable to reach backend.');
+        }
+        finally {
+            setIsPostingBulletin(false);
+        }
+    };
+    const deleteOwnBulletinPost = async (event, post) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!profile?.username) {
+            return;
+        }
+        const sessionKey = `${post.dayKey}:${post.postId}`;
+        if (pendingBulletinDeleteKey === sessionKey) {
+            return;
+        }
+        setPendingBulletinDeleteKey(sessionKey);
+        try {
+            const response = await fetch(apiUrl(`/api/bulletin/posts/${post.postId}?ts=${Date.now()}`), {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ author: profile.username }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                setError(data?.error || 'Unable to delete this bulletin post right now.');
+                return;
+            }
+            setBulletinPosts((current) => current.filter((entry) => !(entry.dayKey === post.dayKey && entry.postId === post.postId)));
+            setLikedBulletinSessionKeys((current) => {
+                const next = new Set(current);
+                next.delete(sessionKey);
+                return next;
+            });
+        }
+        catch {
+            setError('Unable to reach backend.');
+        }
+        finally {
+            setPendingBulletinDeleteKey((current) => (current === sessionKey ? null : current));
+        }
+    };
+    const handleBulletinImageUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            const dataUrl = await resizeImageDataUrl(file, {
+                targetWidth: 960,
+                targetHeight: 960,
+                quality: 0.92,
+                padToBounds: false,
+            });
+            setBulletinImageDraft(dataUrl);
+        }
+        catch (error) {
+            setError(error instanceof Error ? error.message : 'Unable to upload image.');
+        }
+        finally {
+            event.target.value = '';
+        }
+    };
+    const toggleBookLikeFromTooltip = async (event, targetUsername, bookIndex, book) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!profile || profile.isObserver) {
+            return;
+        }
+        const sessionKey = buildBookLikeSessionKey(targetUsername, bookIndex, book);
+        const isAlreadyLiked = likedBookSessionKeys.has(sessionKey);
+        if (pendingLikeKey === sessionKey) {
+            return;
+        }
+        setPendingLikeKey(sessionKey);
+        try {
+            const response = await fetch(apiUrl(`/api/profile/${encodeURIComponent(targetUsername)}/books/${bookIndex}/like?ts=${Date.now()}`), {
+                method: isAlreadyLiked ? 'DELETE' : 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                setError(data?.error || 'Unable to like this book right now.');
+                return;
+            }
+            setLikedBookSessionKeys((current) => {
+                const next = new Set(current);
+                if (isAlreadyLiked) {
+                    next.delete(sessionKey);
+                }
+                else {
+                    next.add(sessionKey);
+                }
+                return next;
+            });
+            const incomingProfile = data?.profile;
+            if (!incomingProfile) {
+                return;
+            }
+            if (targetUsername === profile.username) {
+                setProfile((current) => {
+                    if (!current) {
+                        return current;
+                    }
+                    return mergeIncomingReaderProfile(current, incomingProfile);
+                });
+            }
+            else {
+                setOtherReaders((current) => current.map((reader) => (reader.username === targetUsername ? mergeIncomingReaderProfile(reader, incomingProfile) : reader)));
+            }
+        }
+        catch {
+            setError('Unable to reach backend.');
+        }
+        finally {
+            setPendingLikeKey((current) => (current === sessionKey ? null : current));
+        }
+    };
+    const renderReaderTooltip = (reader, tooltipClassName) => {
+        const safeBookIndex = clampBookIndex(reader.currentBookIndex);
+        const currentBookDetails = reader.books?.[safeBookIndex];
+        const betweenBooksActive = safeBookIndex === BETWEEN_BOOKS_INDEX
+            || (typeof currentBookDetails?.title === 'string' && currentBookDetails.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase());
+        const likeCount = normalizeLikeCount(currentBookDetails?.likeCount ?? 0);
+        const likeSessionKey = buildBookLikeSessionKey(reader.username, safeBookIndex, currentBookDetails);
+        const alreadyLiked = likedBookSessionKeys.has(likeSessionKey);
+        const isPending = pendingLikeKey === likeSessionKey;
+        const likeDisabled = !profile || profile.isObserver || isPending || betweenBooksActive;
+        return (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, onClick: (event) => event.stopPropagation(), onPointerDown: (event) => event.stopPropagation(), children: [!betweenBooksActive && (_jsxs("div", { className: "tooltip-like-inline-row", children: [_jsx("button", { type: "button", className: `tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleBookLikeFromTooltip(event, reader.username, safeBookIndex, currentBookDetails), disabled: likeDisabled, "aria-label": alreadyLiked ? 'Unlike this book' : 'Like this book', children: alreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: likeCount })] })), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Book" }), _jsx("span", { children: betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook })] }), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: reader.currentAuthor })] })), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(reader.progressMode) }), _jsx("span", { children: formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode) })] })), !betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (_jsx("div", { className: "tooltip-rating-only", children: renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0) }))] }));
+    };
+    const handleAvatarUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+            return;
+        }
+        try {
+            const dataUrl = await resizeImageDataUrl(file);
+            setAvatarImageData(dataUrl);
+            setAvatarIconDraft('📚');
+            setAvatarMenuOpen(false);
+        }
+        catch (error) {
+            setError(error instanceof Error ? error.message : 'Unable to upload image.');
+        }
+        finally {
+            event.target.value = '';
+        }
+    };
+    const avatarPreviewValue = avatarImageData ? (_jsx("img", { className: "avatar-menu-preview-image", src: avatarImageData, alt: "Selected avatar" })) : (_jsx("span", { className: "avatar-menu-preview-emoji", role: "img", "aria-label": "selected avatar emoji", children: avatarIconDraft || '📚' }));
     const handleSceneClick = async (event) => {
         const scene = sceneRef.current;
         if (!scene || !profile || profile.isObserver)
@@ -1079,7 +1978,8 @@ function App() {
         if (clickedAvatar) {
             return;
         }
-        if (hoveredReaderUsername) {
+        if (activeTooltipUsername) {
+            setPinnedReaderUsername(null);
             setHoveredReaderUsername(null);
             return;
         }
@@ -1090,103 +1990,362 @@ function App() {
         setAvatarPosition(nextPosition);
         void persistAvatarPosition(nextPosition);
     };
-    return (_jsxs("div", { className: "app-shell", children: [_jsxs("header", { children: [_jsx("h1", { children: "Virtual Reading World" }), _jsx("p", { children: "Choose your spot, update your status, and read." })] }), !profile ? (_jsxs("main", { className: "card", children: [_jsxs("form", { onSubmit: handleSubmit, children: [_jsx("label", { htmlFor: "username", children: "Enter a reader display name" }), _jsx("input", { id: "username", value: username, onChange: (event) => setUsername(event.target.value), placeholder: "reader123", autoFocus: true }), _jsx("button", { type: "submit", disabled: loading, children: loading ? 'Loading…' : 'Continue' })] }), error && _jsx("div", { className: "error", children: error })] })) : (_jsxs("div", { className: "scene-shell", children: [_jsxs("section", { className: "scene-panel", ref: sceneRef, onClick: handleSceneClick, children: [_jsx("img", { className: "scene-image", src: scenePanelBackgroundImage, alt: "" }), _jsx("div", { className: "scene-overlay", style: { background: scenePanelOverlay } }), _jsxs("div", { className: "active-reader-count", children: [(profile?.isObserver ? otherReaders.length : otherReaders.length + 1), " / ", activeReaderLimit, " active readers", observerCount > 0 ? ` • ${observerCount} observer${observerCount === 1 ? '' : 's'}` : ''] }), announcementMessage && (_jsxs("div", { className: `announcement-overlay announcement-overlay-${announcementVariant}`, children: [_jsxs("div", { className: "announcement-title", children: ["Announcements [", announcementDateLabel, "]"] }), _jsx("div", { className: "announcement-message", children: announcementMessage })] })), !profile.isObserver && (_jsx("div", { className: "avatar-wrapper current-reader", style: { left: `${avatarPosition.x}px`, top: `${avatarPosition.y}px` }, onMouseEnter: () => handleAvatarMouseEnter(profile.username), onMouseLeave: () => handleAvatarMouseLeave(profile.username), onClick: (event) => handleAvatarClick(event, profile.username), children: _jsxs("div", { className: "avatar-anchor", children: [_jsxs("div", { className: "avatar", children: [hoveredReaderUsername === profile.username && (_jsxs("div", { className: `avatar-tooltip ${currentTooltipClassName}`, children: [_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Book" }), _jsx("span", { children: profile.currentBook })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: profile.currentAuthor })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(profile.progressMode) }), _jsx("span", { children: formatProgressDisplay(profile.currentPage ?? 0, profile.totalPageCount ?? 0, profile.progressMode) })] })] })), _jsx("span", { role: "img", "aria-label": "reader", children: profile.avatarIcon || (profile.isObserver ? '👀' : '📚') }), _jsx("span", { className: "book-format-badge", role: "img", "aria-label": "format", children: formatBadgeEmoji(profile.books?.[profile.currentBookIndex]?.format ?? 'physical') })] }), _jsx("div", { className: "avatar-name", children: formatReaderBadgeLabel(profile.username, profile.status) })] }) })), otherReaders.map((reader) => {
+    const exitSceneFullscreen = async () => {
+        setIsSceneImmersive(false);
+        const fullscreenDocument = document;
+        try {
+            if (document.fullscreenElement && document.exitFullscreen) {
+                await document.exitFullscreen();
+                return;
+            }
+            if (fullscreenDocument.webkitFullscreenElement && fullscreenDocument.webkitExitFullscreen) {
+                await fullscreenDocument.webkitExitFullscreen();
+            }
+        }
+        catch {
+            // Keep the fallback immersive mode reversible even if the browser fullscreen API fails.
+        }
+    };
+    const toggleSceneFullscreen = async () => {
+        const sceneElement = sceneRef.current;
+        if (!sceneElement) {
+            return;
+        }
+        if (isSceneExpanded) {
+            await exitSceneFullscreen();
+            return;
+        }
+        setIsSceneImmersive(true);
+        try {
+            if (sceneElement.requestFullscreen) {
+                await sceneElement.requestFullscreen();
+                return;
+            }
+            if (sceneElement.webkitRequestFullscreen) {
+                await sceneElement.webkitRequestFullscreen();
+            }
+        }
+        catch {
+            // The fixed-position immersive fallback still works when the Fullscreen API is unavailable.
+        }
+    };
+    const loadForestBuffer = async (context) => {
+        if (forestAudioBufferRef.current) {
+            return forestAudioBufferRef.current;
+        }
+        const response = await fetch(`${import.meta.env.BASE_URL}bird.wav`);
+        if (!response.ok) {
+            throw new Error('Unable to load forest sound.');
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const decodedBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+        const trimmedBuffer = trimAudioBufferEdges(decodedBuffer);
+        forestAudioBufferRef.current = trimmedBuffer;
+        return trimmedBuffer;
+    };
+    const stopForestSound = () => {
+        const source = forestAudioSourceRef.current;
+        const context = forestAudioContextRef.current;
+        forestAudioSourceRef.current = null;
+        forestAudioContextRef.current = null;
+        if (source) {
+            try {
+                source.stop();
+            }
+            catch {
+                // ignore already-ended sources
+            }
+            source.disconnect();
+        }
+        if (context && context.state !== 'closed') {
+            void context.close().catch(() => undefined);
+        }
+    };
+    const toggleForestSound = async () => {
+        if (!isForestScene) {
+            return;
+        }
+        if (isForestSoundEnabled) {
+            stopForestSound();
+            setIsForestSoundEnabled(false);
+            return;
+        }
+        try {
+            const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextCtor) {
+                setError('Your browser does not support the forest sound effect.');
+                return;
+            }
+            const context = new AudioContextCtor();
+            if (context.state === 'suspended') {
+                await context.resume();
+            }
+            const buffer = await loadForestBuffer(context);
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+            source.loopStart = 0;
+            source.loopEnd = buffer.duration;
+            const gain = context.createGain();
+            gain.gain.value = 0.45;
+            source.connect(gain);
+            gain.connect(context.destination);
+            source.start();
+            forestAudioContextRef.current = context;
+            forestAudioSourceRef.current = source;
+            setIsForestSoundEnabled(true);
+        }
+        catch {
+            stopForestSound();
+            setError('Unable to start forest sound right now.');
+        }
+    };
+    const loadRainBuffer = async (context) => {
+        if (rainAudioBufferRef.current) {
+            return rainAudioBufferRef.current;
+        }
+        const response = await fetch(`${import.meta.env.BASE_URL}rain.wav`);
+        if (!response.ok) {
+            throw new Error('Unable to load rain sound.');
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const decodedBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+        const trimmedBuffer = trimAudioBufferEdges(decodedBuffer);
+        rainAudioBufferRef.current = trimmedBuffer;
+        return trimmedBuffer;
+    };
+    const stopRainSound = () => {
+        const source = rainAudioSourceRef.current;
+        const context = rainAudioContextRef.current;
+        rainAudioSourceRef.current = null;
+        rainAudioContextRef.current = null;
+        if (source) {
+            try {
+                source.stop();
+            }
+            catch {
+                // ignore already-ended sources
+            }
+            source.disconnect();
+        }
+        if (context && context.state !== 'closed') {
+            void context.close().catch(() => undefined);
+        }
+    };
+    const toggleRainSound = async () => {
+        if (!isRainScene) {
+            return;
+        }
+        if (isRainSoundEnabled) {
+            stopRainSound();
+            setIsRainSoundEnabled(false);
+            return;
+        }
+        try {
+            const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextCtor) {
+                setError('Your browser does not support the rain sound effect.');
+                return;
+            }
+            const context = new AudioContextCtor();
+            if (context.state === 'suspended') {
+                await context.resume();
+            }
+            const buffer = await loadRainBuffer(context);
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+            source.loopStart = 0;
+            source.loopEnd = buffer.duration;
+            const gain = context.createGain();
+            gain.gain.value = 0.55;
+            source.connect(gain);
+            gain.connect(context.destination);
+            source.start();
+            rainAudioContextRef.current = context;
+            rainAudioSourceRef.current = source;
+            setIsRainSoundEnabled(true);
+        }
+        catch {
+            stopRainSound();
+            setError('Unable to start rain sound right now.');
+        }
+    };
+    useEffect(() => {
+        if (!isForestScene && isForestSoundEnabled) {
+            stopForestSound();
+            setIsForestSoundEnabled(false);
+        }
+    }, [isForestScene, isForestSoundEnabled]);
+    useEffect(() => {
+        if (!isRainScene && isRainSoundEnabled) {
+            stopRainSound();
+            setIsRainSoundEnabled(false);
+        }
+    }, [isRainScene, isRainSoundEnabled]);
+    useEffect(() => () => {
+        stopForestSound();
+        stopRainSound();
+    }, []);
+    return (_jsxs("div", { className: "app-shell", children: [_jsxs("header", { children: [_jsx("h1", { children: "Virtual Reading World" }), _jsx("p", { children: "Choose your spot, update your status, and read." })] }), !profile ? (_jsxs(_Fragment, { children: [_jsxs("main", { className: "card", children: [_jsxs("form", { onSubmit: handleSubmit, children: [_jsx("label", { htmlFor: "username", children: "Enter a reader display name" }), _jsx("input", { id: "username", value: username, onChange: (event) => setUsername(event.target.value), placeholder: "reader123", autoFocus: true }), _jsx("button", { type: "submit", disabled: loading, children: loading ? 'Loading…' : 'Continue' })] }), error && _jsx("div", { className: "error", children: error })] }), _jsxs("div", { className: "login-links", "aria-label": "External links", children: [_jsx("a", { href: "https://www.threads.com/@tothemax2050", target: "_blank", rel: "noreferrer", "aria-label": "Open Threads page", title: "My @Tothemax2050 Threads Page", children: _jsx("img", { className: "login-link-threads-icon", src: `${import.meta.env.BASE_URL}Threads.webp`, alt: "" }) }), _jsx("a", { href: "https://readingisalifestyle.com", target: "_blank", rel: "noreferrer", "aria-label": "Open home page", title: "My Reading Is A Lifestyle Homepage", className: "login-link-image-link", children: _jsx("img", { className: "login-link-home-image", src: `${import.meta.env.BASE_URL}homepage.webp`, alt: "" }) })] })] })) : (_jsxs("div", { className: `scene-shell ${isSceneExpanded ? 'scene-shell-immersive' : ''}`, children: [_jsxs("section", { className: `scene-panel ${isSceneExpanded ? 'scene-panel-immersive' : ''}`, ref: sceneRef, onClick: handleSceneClick, children: [_jsx("img", { className: `scene-image ${selectedSceneOption.value === 'sunrise' || selectedSceneOption.value === 'night' ? 'scene-image-left-focus' : ''}`, src: scenePanelBackgroundImage, alt: "" }), _jsx("div", { className: "scene-overlay", style: { background: scenePanelOverlay } }), _jsx("button", { type: "button", className: "scene-fullscreen-toggle", onClick: (event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    void toggleSceneFullscreen();
+                                }, "aria-label": isSceneExpanded ? 'Restore page layout' : 'Expand reading scene', title: isSceneExpanded ? 'Restore page layout' : 'Expand reading scene', children: _jsx("span", { className: "scene-fullscreen-toggle-icon", "aria-hidden": "true", children: isSceneExpanded ? '✕' : '⤢' }) }), (isForestScene || isRainScene) && (_jsx("button", { type: "button", className: `scene-sound-toggle ${(isForestScene && isForestSoundEnabled) || (isRainScene && isRainSoundEnabled) ? 'scene-sound-toggle-on' : ''}`, "aria-label": isForestScene
+                                    ? (isForestSoundEnabled ? 'Disable forest sound' : 'Enable forest sound')
+                                    : (isRainSoundEnabled ? 'Disable rain sound' : 'Enable rain sound'), title: isForestScene
+                                    ? (isForestSoundEnabled ? 'Disable forest sound' : 'Enable forest sound')
+                                    : (isRainSoundEnabled ? 'Disable rain sound' : 'Enable rain sound'), onClick: (event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (isForestScene) {
+                                        void toggleForestSound();
+                                        return;
+                                    }
+                                    void toggleRainSound();
+                                }, children: _jsx("span", { className: "scene-sound-toggle-icon", "aria-hidden": "true", children: (isForestScene && isForestSoundEnabled) || (isRainScene && isRainSoundEnabled) ? '🔊' : '🔈' }) })), announcementMessage && (_jsxs("div", { className: `announcement-overlay announcement-overlay-${announcementVariant}`, children: [_jsxs("div", { className: "announcement-title", children: ["Announcements [", announcementDateLabel, "]"] }), _jsx("div", { className: "announcement-message", children: announcementMessage })] })), !profile.isObserver && (_jsx("div", { className: `avatar-wrapper current-reader ${avatarPosition.x > sceneWidth - 220 ? 'avatar-name-left' : ''}`, style: {
+                                    left: `${Math.min(Math.max(avatarPosition.x > sceneWidth - 220 ? avatarPosition.x - 170 : avatarPosition.x, 0), sceneWidth - 120)}px`,
+                                    top: `${avatarPosition.y}px`,
+                                }, onMouseEnter: () => handleAvatarMouseEnter(profile.username), onMouseLeave: () => handleAvatarMouseLeave(profile.username), onClick: (event) => handleAvatarClick(event, profile.username), children: _jsxs("div", { className: "avatar-anchor", children: [_jsxs("div", { className: "avatar", children: [activeTooltipUsername === profile.username && (renderReaderTooltip(profile, currentTooltipClassName)), renderAvatarContent(profile, profile.isObserver ? '👀' : '📚'), renderReadingTimeBadge(profile), _jsx("span", { className: "book-format-badge", role: "img", "aria-label": "format", children: formatBadgeEmoji(profile.books?.[profile.currentBookIndex]?.format ?? 'physical') })] }), _jsx("div", { className: "avatar-name", children: formatReaderBadgeLabel(profile.username, profile.status) })] }) })), otherReaders.map((reader) => {
                                 const renderedPosition = toRenderedPosition(reader.positionX, reader.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520);
                                 const tooltipClassName = tooltipPlacementClass(getTooltipPlacement(renderedPosition, sceneWidth));
-                                return (_jsx("div", { className: "avatar-wrapper remote-avatar", style: { left: `${renderedPosition.x}px`, top: `${renderedPosition.y}px` }, onMouseEnter: () => handleAvatarMouseEnter(reader.username), onMouseLeave: () => handleAvatarMouseLeave(reader.username), onClick: (event) => handleAvatarClick(event, reader.username), children: _jsxs("div", { className: "avatar-anchor", children: [_jsxs("div", { className: `avatar remote-avatar-badge ${hoveredReaderUsername === reader.username ? 'avatar-hovered' : ''}`, children: [hoveredReaderUsername === reader.username && (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, children: [_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Book" }), _jsx("span", { children: reader.currentBook })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: reader.currentAuthor })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(reader.progressMode) }), _jsx("span", { children: formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode) })] })] })), _jsx("span", { role: "img", "aria-label": "reader", children: reader.avatarIcon || '📖' }), _jsx("span", { className: "book-format-badge", role: "img", "aria-label": "format", children: formatBadgeEmoji(reader.books?.[reader.currentBookIndex]?.format ?? 'physical') })] }), _jsx("div", { className: "avatar-name remote-avatar-name", children: formatReaderBadgeLabel(reader.username, reader.status) })] }) }, reader.username));
-                            })] }), _jsxs("aside", { className: "profile-card", children: [_jsxs("div", { className: "profile-card-header", children: [_jsx("h2", { children: profile.username }), !profile.isObserver && (_jsx("div", { className: "profile-card-controls", children: _jsxs("div", { className: "profile-field avatar-field compact-avatar-field", children: [_jsx("label", { children: "Avatar" }), _jsx("select", { className: "avatar-select", value: avatarIconDraft || AVATAR_OPTIONS[0], onChange: (event) => {
-                                                        const nextIcon = event.target.value;
-                                                        setAvatarIconDraft(nextIcon);
-                                                    }, children: AVATAR_OPTIONS.map((icon) => (_jsx("option", { value: icon, children: icon }, icon))) })] }) }))] }), profile.isObserver ? (_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Observer mode" }), _jsx("p", { children: "You are viewing the beach without a stored profile." })] })) : (_jsxs("form", { onSubmit: saveProfile, children: [_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Reading scene" }), _jsx("div", { className: "scene-option-buttons", role: "group", "aria-label": "Reading scene options", children: SCENE_OPTIONS.map((option) => (_jsx("button", { type: "button", className: `scene-option-button ${(profileForm.backgroundScene || profile?.backgroundScene || 'ocean-beach') === option.value ? 'scene-option-button-active' : ''}`, onClick: () => {
+                                const isNearRightEdge = renderedPosition.x > sceneWidth - 220;
+                                return (_jsx("div", { className: `avatar-wrapper remote-avatar ${isNearRightEdge ? 'avatar-name-left' : ''}`, style: {
+                                        left: `${Math.min(Math.max(isNearRightEdge ? renderedPosition.x - 170 : renderedPosition.x, 0), sceneWidth - 120)}px`,
+                                        top: `${renderedPosition.y}px`,
+                                    }, onMouseEnter: () => handleAvatarMouseEnter(reader.username), onMouseLeave: () => handleAvatarMouseLeave(reader.username), onClick: (event) => handleAvatarClick(event, reader.username), children: _jsxs("div", { className: "avatar-anchor", children: [_jsxs("div", { className: `avatar remote-avatar-badge ${activeTooltipUsername === reader.username ? 'avatar-hovered' : ''}`, children: [activeTooltipUsername === reader.username && (renderReaderTooltip(reader, tooltipClassName)), renderAvatarContent(reader, '📖'), renderReadingTimeBadge(reader), _jsx("span", { className: "book-format-badge", role: "img", "aria-label": "format", children: formatBadgeEmoji(reader.books?.[reader.currentBookIndex]?.format ?? 'physical') })] }), _jsx("div", { className: "avatar-name remote-avatar-name", children: formatReaderBadgeLabel(reader.username, reader.status) })] }) }, reader.username));
+                            })] }), _jsxs("aside", { className: `profile-card ${isProfileCollapsed ? 'profile-card-collapsed' : ''}`, children: [_jsxs("div", { className: "profile-card-header", children: [_jsxs("div", { className: "profile-card-header-main", children: [_jsx("h2", { children: `${profile.username}'s profile` }), !profile.isObserver && (_jsxs("div", { className: "profile-field avatar-field compact-avatar-field", children: [_jsx("label", { children: "Avatar" }), _jsxs("div", { className: "avatar-picker-wrap", children: [_jsx("button", { type: "button", className: "avatar-picker-button", onClick: () => setAvatarMenuOpen((current) => !current), "aria-expanded": avatarMenuOpen, "aria-label": "Choose avatar icon or upload image", children: avatarPreviewValue }), avatarMenuOpen && (_jsxs("div", { className: "avatar-picker-menu", role: "menu", "aria-label": "Avatar choices", children: [_jsx("div", { className: "avatar-picker-grid", children: AVATAR_OPTIONS.map((icon) => (_jsx("button", { type: "button", className: "avatar-picker-option", onClick: () => {
+                                                                                setAvatarIconDraft(icon);
+                                                                                setAvatarImageData('');
+                                                                                setAvatarMenuOpen(false);
+                                                                            }, children: icon }, icon))) }), _jsxs("label", { className: "avatar-picker-upload", children: [_jsx("input", { type: "file", accept: "image/*", onChange: handleAvatarUpload }), "Upload custom image"] })] }))] })] }))] }), _jsx("div", { className: "profile-card-controls", children: _jsx("button", { type: "button", className: "profile-collapse-button", onClick: () => {
+                                                setAvatarMenuOpen(false);
+                                                setIsProfileCollapsed((current) => !current);
+                                            }, "aria-expanded": !isProfileCollapsed, "aria-controls": "profile-editor-body", "aria-label": isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', title: isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', children: isProfileCollapsed ? '▢' : '—' }) })] }), !isProfileCollapsed && profile.isObserver ? (_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Observer mode" }), _jsx("p", { children: "You are viewing the beach without a stored profile." })] })) : null, !isProfileCollapsed && !profile.isObserver ? (_jsxs("form", { id: "profile-editor-body", onSubmit: saveProfile, children: [_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Reading scene" }), _jsx("div", { className: "scene-option-buttons", role: "group", "aria-label": "Reading scene options", children: SCENE_OPTIONS.map((option) => (_jsxs("button", { type: "button", className: `scene-option-button ${(profileForm.backgroundScene || profile?.backgroundScene || 'ocean-beach') === option.value ? 'scene-option-button-active' : ''}`, onClick: () => {
                                                         setProfileForm((current) => ({
                                                             ...current,
                                                             backgroundScene: option.value,
                                                         }));
                                                         setScenePreview(option.value);
-                                                    }, children: option.shortLabel }, option.value))) })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "statusText", children: "Reading status or mood" }), _jsx("input", { id: "statusText", className: "status-text-input", value: statusText, onChange: (event) => setStatusText(event.target.value), placeholder: "in a coffee break", maxLength: 48 }), _jsx("p", { className: "progress-hint", children: "A short witty one-liner is ideal." })] }), _jsxs("div", { className: "profile-field profile-field-divider", children: [_jsx("div", { className: "simple-divider", "aria-hidden": "true" }), _jsx("label", { children: "Editing current book" }), _jsx("div", { className: "book-slot-tabs", role: "tablist", "aria-label": "Book slots", children: [0, 1, 2].map((index) => (_jsx("button", { type: "button", role: "tab", "aria-selected": safeEditingBookIndex === index, className: `book-slot-tab ${safeEditingBookIndex === index ? 'book-slot-tab-active' : ''}`, onClick: () => {
+                                                    }, children: [_jsxs("span", { className: "scene-option-button-main", children: [option.icon && _jsx("span", { className: "scene-option-button-icon", "aria-hidden": "true", children: option.icon }), _jsx("span", { children: option.shortLabel })] }), option.badge && _jsx("span", { className: "scene-option-button-badge", "aria-hidden": "true", children: option.badge })] }, option.value))) })] }), _jsx("div", { className: "profile-section-card profile-status-section-card", children: _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "statusText", children: "Reading status or mood" }), _jsx("input", { id: "statusText", className: "status-text-input", value: statusText, onChange: (event) => {
+                                                        const nextStatus = event.target.value;
+                                                        statusTextRef.current = nextStatus;
+                                                        setStatusText(nextStatus);
+                                                    }, placeholder: "in a coffee break", maxLength: 48 }), _jsx("p", { className: "progress-hint", children: "A short witty one-liner is ideal." }), _jsx("div", { className: "profile-section-action-row", children: _jsx("button", { type: "button", className: "secondary profile-partial-save-button", onClick: () => {
+                                                            void saveStatusAndMood();
+                                                        }, disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }) }), _jsxs("div", { className: "profile-field profile-field-divider", children: [_jsx("div", { className: "simple-divider", "aria-hidden": "true" }), _jsx("label", { children: "Editing current book" }), _jsx("div", { className: "book-slot-tabs", role: "tablist", "aria-label": "Book slots", children: BOOK_SLOT_OPTIONS.map((slot) => (_jsx("button", { type: "button", role: "tab", "aria-selected": safeEditingBookIndex === slot.index, className: `book-slot-tab ${safeEditingBookIndex === slot.index ? 'book-slot-tab-active' : ''}`, onClick: () => {
                                                         setProfileForm((current) => ({
                                                             ...current,
-                                                            editingBookIndex: index,
+                                                            editingBookIndex: slot.index,
                                                         }));
-                                                    }, children: `Book ${index + 1}` }, `book-slot-${index + 1}`))) })] }), _jsx("p", { className: "progress-hint", children: "The selected editing slot is the current book shown in scene after save." }), _jsxs("div", { className: "book-editor-box", children: [_jsx("div", { className: "book-editor-title", children: currentBookSlotLabels[safeEditingBookIndex] || `Book ${safeEditingBookIndex + 1}` }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "bookFormat", children: "Book format" }), _jsx("select", { id: "bookFormat", className: "progress-mode-select", value: editingBook.format, onChange: (event) => {
-                                                            const nextFormat = normalizeBookFormat(event.target.value);
-                                                            setProfileForm((current) => {
-                                                                const nextBooks = [...current.books];
-                                                                const activeDraft = nextBooks[safeEditingBookIndex];
-                                                                const previousMode = progressModeForFormat(activeDraft.format);
-                                                                const nextMode = progressModeForFormat(nextFormat);
-                                                                const currentValue = parseDraftProgress(activeDraft.currentProgress, previousMode);
-                                                                const totalValue = parseDraftProgress(activeDraft.totalProgress, previousMode);
-                                                                nextBooks[safeEditingBookIndex] = {
-                                                                    ...activeDraft,
-                                                                    format: nextFormat,
-                                                                    currentProgress: formatProgressInput(currentValue ?? 0, nextMode),
-                                                                    totalProgress: formatProgressInput(totalValue ?? 0, nextMode),
-                                                                };
-                                                                return {
-                                                                    ...current,
-                                                                    books: nextBooks,
-                                                                };
-                                                            });
-                                                        }, children: BOOK_FORMAT_OPTIONS.map((option) => (_jsxs("option", { value: option.value, children: [option.emoji, " ", option.label] }, option.value))) })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "currentBook", children: "Book title" }), _jsx("input", { id: "currentBook", value: editingBook.title, onChange: (event) => {
-                                                            const nextValue = event.target.value;
-                                                            setProfileForm((current) => {
-                                                                const nextBooks = [...current.books];
-                                                                nextBooks[safeEditingBookIndex] = {
-                                                                    ...nextBooks[safeEditingBookIndex],
-                                                                    title: nextValue,
-                                                                };
-                                                                return {
-                                                                    ...current,
-                                                                    books: nextBooks,
-                                                                };
-                                                            });
-                                                        } })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "currentAuthor", children: "Author" }), _jsx("input", { id: "currentAuthor", value: editingBook.author, onChange: (event) => {
-                                                            const nextValue = event.target.value;
-                                                            setProfileForm((current) => {
-                                                                const nextBooks = [...current.books];
-                                                                nextBooks[safeEditingBookIndex] = {
-                                                                    ...nextBooks[safeEditingBookIndex],
-                                                                    author: nextValue,
-                                                                };
-                                                                return {
-                                                                    ...current,
-                                                                    books: nextBooks,
-                                                                };
-                                                            });
-                                                        } })] }), _jsxs("div", { className: "profile-field progress-field", children: [_jsx("label", { htmlFor: "progressCurrent", children: "Reading progress" }), _jsx("div", { className: "progress-controls", children: _jsxs("div", { className: "progress-input-row", children: [_jsx("input", { id: "progressCurrent", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.currentProgress, onChange: (event) => {
-                                                                        const nextValue = event.target.value;
-                                                                        setProfileForm((current) => {
-                                                                            const nextBooks = [...current.books];
-                                                                            nextBooks[safeEditingBookIndex] = {
-                                                                                ...nextBooks[safeEditingBookIndex],
-                                                                                currentProgress: nextValue,
-                                                                            };
-                                                                            return {
-                                                                                ...current,
-                                                                                books: nextBooks,
-                                                                            };
-                                                                        });
-                                                                    }, placeholder: editingBookMode === 'audio' ? '5h5m' : '100' }), _jsx("span", { className: "progress-separator", children: "/" }), _jsx("input", { id: "progressTotal", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.totalProgress, onChange: (event) => {
-                                                                        const nextValue = event.target.value;
-                                                                        setProfileForm((current) => {
-                                                                            const nextBooks = [...current.books];
-                                                                            nextBooks[safeEditingBookIndex] = {
-                                                                                ...nextBooks[safeEditingBookIndex],
-                                                                                totalProgress: nextValue,
-                                                                            };
-                                                                            return {
-                                                                                ...current,
-                                                                                books: nextBooks,
-                                                                            };
-                                                                        });
-                                                                    }, placeholder: editingBookMode === 'audio' ? '10h30m' : '400' })] }) }), _jsx("p", { className: "progress-hint", children: editingBookMode === 'audio'
-                                                            ? 'Enter minutes or h/m format (e.g. 5h5m / 10h30m).'
-                                                            : 'Enter page counts (e.g. 100 / 400).' })] })] }), _jsx("button", { type: "submit", disabled: loading, children: loading ? 'Saving…' : 'Save profile' })] })), profile.isObserver && (_jsx("div", { children: "When space opens up in the active reader list, you can leave and rejoin as an active reader." })), _jsx("button", { type: "button", className: "secondary", onClick: (event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    void handleLeave();
-                                }, children: "Leave" })] })] }))] }));
+                                                    }, children: slot.label }, `book-slot-${slot.index}`))) })] }), _jsxs("div", { className: "profile-section-card", children: [_jsx("p", { className: "progress-hint", children: "The selected editing slot is the current book shown in scene after save." }), _jsxs("div", { className: "book-editor-box", children: [_jsx("div", { className: "book-editor-title", children: currentBookSlotLabels[safeEditingBookIndex] || `Book ${safeEditingBookIndex + 1}` }), isEditingBetweenBooks ? (_jsx("p", { className: "progress-hint", children: "You are between books right now. Save or update to show this in the scene tooltip." })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "bookFormat", children: "Book format" }), _jsx("select", { id: "bookFormat", className: "progress-mode-select", value: editingBook.format, onChange: (event) => {
+                                                                            const nextFormat = normalizeBookFormat(event.target.value);
+                                                                            setProfileForm((current) => {
+                                                                                const nextBooks = [...current.books];
+                                                                                const activeDraft = nextBooks[safeEditingBookIndex];
+                                                                                const previousMode = progressModeForFormat(activeDraft.format);
+                                                                                const nextMode = progressModeForFormat(nextFormat);
+                                                                                const currentValue = parseDraftProgress(activeDraft.currentProgress, previousMode);
+                                                                                const totalValue = parseDraftProgress(activeDraft.totalProgress, previousMode);
+                                                                                nextBooks[safeEditingBookIndex] = {
+                                                                                    ...activeDraft,
+                                                                                    format: nextFormat,
+                                                                                    currentProgress: formatProgressInput(currentValue ?? 0, nextMode),
+                                                                                    totalProgress: formatProgressInput(totalValue ?? 0, nextMode),
+                                                                                };
+                                                                                return {
+                                                                                    ...current,
+                                                                                    books: nextBooks,
+                                                                                };
+                                                                            });
+                                                                        }, children: BOOK_FORMAT_OPTIONS.map((option) => (_jsxs("option", { value: option.value, children: [option.emoji, " ", option.label] }, option.value))) })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "currentBook", children: "Book title" }), _jsx("input", { id: "currentBook", value: editingBook.title, onChange: (event) => {
+                                                                            const nextValue = event.target.value;
+                                                                            setProfileForm((current) => {
+                                                                                const nextBooks = [...current.books];
+                                                                                nextBooks[safeEditingBookIndex] = {
+                                                                                    ...nextBooks[safeEditingBookIndex],
+                                                                                    title: nextValue,
+                                                                                };
+                                                                                return {
+                                                                                    ...current,
+                                                                                    books: nextBooks,
+                                                                                };
+                                                                            });
+                                                                        } })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "currentAuthor", children: "Author" }), _jsx("input", { id: "currentAuthor", value: editingBook.author, onChange: (event) => {
+                                                                            const nextValue = event.target.value;
+                                                                            setProfileForm((current) => {
+                                                                                const nextBooks = [...current.books];
+                                                                                nextBooks[safeEditingBookIndex] = {
+                                                                                    ...nextBooks[safeEditingBookIndex],
+                                                                                    author: nextValue,
+                                                                                };
+                                                                                return {
+                                                                                    ...current,
+                                                                                    books: nextBooks,
+                                                                                };
+                                                                            });
+                                                                        } })] }), _jsxs("div", { className: "profile-field progress-field", children: [_jsx("label", { htmlFor: "progressCurrent", children: "Reading progress" }), _jsx("div", { className: "progress-controls", children: _jsxs("div", { className: "progress-input-row", children: [_jsx("input", { id: "progressCurrent", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.currentProgress, onChange: (event) => {
+                                                                                        const nextValue = event.target.value;
+                                                                                        setProfileForm((current) => {
+                                                                                            const nextBooks = [...current.books];
+                                                                                            nextBooks[safeEditingBookIndex] = {
+                                                                                                ...nextBooks[safeEditingBookIndex],
+                                                                                                currentProgress: nextValue,
+                                                                                            };
+                                                                                            return {
+                                                                                                ...current,
+                                                                                                books: nextBooks,
+                                                                                            };
+                                                                                        });
+                                                                                    }, placeholder: editingBookMode === 'audio' ? '5h5m' : '100' }), _jsx("span", { className: "progress-separator", children: "/" }), _jsx("input", { id: "progressTotal", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.totalProgress, onChange: (event) => {
+                                                                                        const nextValue = event.target.value;
+                                                                                        setProfileForm((current) => {
+                                                                                            const nextBooks = [...current.books];
+                                                                                            nextBooks[safeEditingBookIndex] = {
+                                                                                                ...nextBooks[safeEditingBookIndex],
+                                                                                                totalProgress: nextValue,
+                                                                                            };
+                                                                                            return {
+                                                                                                ...current,
+                                                                                                books: nextBooks,
+                                                                                            };
+                                                                                        });
+                                                                                    }, placeholder: editingBookMode === 'audio' ? '10h30m' : '400' })] }) }), _jsx("p", { className: "progress-hint", children: editingBookMode === 'audio'
+                                                                            ? 'Enter minutes or h/m format (e.g. 5h5m / 10h30m).'
+                                                                            : 'Enter page counts (e.g. 100 / 400).' })] }), _jsxs("div", { className: "profile-field rating-field", children: [_jsx("label", { htmlFor: "bookRating", children: "Current rating" }), _jsxs("div", { className: "rating-control", children: [_jsx("input", { id: "bookRating", className: "rating-slider", type: "range", min: 0, max: 5, step: 0.5, value: currentRatingValue, style: ratingSliderStyle, onChange: (event) => {
+                                                                                    const nextValue = Number(event.target.value);
+                                                                                    setProfileForm((current) => {
+                                                                                        const nextBooks = [...current.books];
+                                                                                        nextBooks[safeEditingBookIndex] = {
+                                                                                            ...nextBooks[safeEditingBookIndex],
+                                                                                            currentRating: normalizeRating(nextValue),
+                                                                                        };
+                                                                                        return {
+                                                                                            ...current,
+                                                                                            books: nextBooks,
+                                                                                        };
+                                                                                    });
+                                                                                }, "aria-label": "Current book rating" }), _jsxs("div", { className: "rating-display-row", children: [_jsx("div", { className: "rating-stars", "aria-hidden": "true", children: Array.from({ length: 5 }, (_, index) => {
+                                                                                            const starValue = index + 1;
+                                                                                            const rating = normalizeRating(editingBook.currentRating ?? 0);
+                                                                                            const partialFill = rating > index && rating < starValue;
+                                                                                            const fillPercent = partialFill ? ((rating - index) * 100) : 0;
+                                                                                            const filled = rating >= starValue;
+                                                                                            return (_jsx("span", { className: `rating-star ${filled ? 'rating-star-filled' : partialFill ? 'rating-star-half' : 'rating-star-empty'}`, style: partialFill ? { ['--fill-percent']: `${fillPercent}%` } : undefined, children: "\u2605" }, `rating-star-${starValue}`));
+                                                                                        }) }), _jsx("div", { className: "rating-readout", children: formatRatingLabel(normalizeRating(editingBook.currentRating ?? 0)) })] })] })] })] }))] }), _jsx("div", { className: "profile-section-action-row", children: _jsx("button", { type: "button", className: "secondary profile-partial-save-button", onClick: () => {
+                                                        void saveBookInformation();
+                                                    }, disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }), _jsx("button", { type: "submit", className: "profile-save-button", disabled: loading, children: loading ? 'Saving…' : 'Update profile' })] })) : null, !isProfileCollapsed && profile.isObserver && (_jsx("div", { children: "When space opens up in the active reader list, you can leave and rejoin as an active reader." }))] }), _jsxs("section", { className: `bulletin-board ${isBulletinCollapsed ? 'bulletin-board-collapsed' : ''}`, "aria-label": "Daily bulletin board", children: [_jsxs("div", { className: "bulletin-board-header", children: [_jsxs("div", { className: "bulletin-board-header-main", children: [_jsx("h3", { children: "Daily Bulletin Board" }), _jsx("p", { children: "New day, fresh board. Newest posts appear first." })] }), _jsx("button", { type: "button", className: "profile-collapse-button", onClick: () => setIsBulletinCollapsed((current) => !current), "aria-expanded": !isBulletinCollapsed, "aria-controls": "bulletin-board-body", "aria-label": isBulletinCollapsed ? 'Expand bulletin board' : 'Minimize bulletin board', title: isBulletinCollapsed ? 'Expand bulletin board' : 'Minimize bulletin board', children: isBulletinCollapsed ? '▢' : '—' })] }), !isBulletinCollapsed && (_jsxs("div", { id: "bulletin-board-body", className: "bulletin-board-body", children: [_jsx("div", { className: "bulletin-feed", role: "feed", "aria-live": "polite", children: bulletinPosts.length === 0 ? (_jsx("p", { className: "bulletin-empty", children: "No posts yet today. Be the first to share." })) : (bulletinPosts.map((post) => {
+                                            const likeKey = `${post.dayKey}:${post.postId}`;
+                                            const liked = likedBulletinSessionKeys.has(likeKey);
+                                            const likePending = pendingBulletinLikeKey === likeKey;
+                                            const deletePending = pendingBulletinDeleteKey === likeKey;
+                                            const canDelete = profile?.username === post.author;
+                                            return (_jsxs("article", { className: "bulletin-post", role: "article", "aria-label": `Post ${post.postId}`, children: [_jsxs("div", { className: "bulletin-post-meta", children: [_jsxs("div", { className: "bulletin-author-wrap", children: [_jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: post.avatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: post.avatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: post.avatarIcon || '📚' })) }), _jsx("span", { className: "bulletin-author-name", children: post.author }), _jsxs("span", { className: "bulletin-post-id", children: ["#", post.postId] })] }), _jsx("span", { className: "bulletin-post-time", children: formatRelativeTime(post.createdAt, browserNow) })] }), _jsxs("div", { className: `bulletin-post-content ${post.imageData ? 'bulletin-post-content-has-image' : ''}`, children: [post.text && _jsx("p", { className: "bulletin-post-text", children: post.text }), post.imageData && (_jsx("button", { type: "button", className: "bulletin-post-image-button", onClick: () => setExpandedBulletinImage(post.imageData), "aria-label": `Open image from post ${post.postId}`, children: _jsx("img", { className: "bulletin-post-image", src: post.imageData, alt: `Bulletin post by ${post.author}` }) }))] }), _jsxs("div", { className: "bulletin-like-row", children: [canDelete && (_jsx("button", { type: "button", className: "bulletin-delete-button", onClick: (event) => deleteOwnBulletinPost(event, post), disabled: deletePending, "aria-label": "Delete this post", children: deletePending ? 'Deleting…' : 'Delete' })), _jsx("button", { type: "button", className: `bulletin-like-button ${liked ? 'bulletin-like-button-done' : ''}`, onClick: (event) => toggleBulletinPostLike(event, post), disabled: likePending || deletePending, "aria-label": liked ? 'Unlike this post' : 'Like this post', children: liked ? '♥' : '♡' }), _jsx("span", { className: "bulletin-like-count", "aria-live": "polite", children: post.likeCount })] })] }, `${post.dayKey}-${post.postId}`));
+                                        })) }), _jsxs("form", { className: "bulletin-composer", onSubmit: submitBulletinPost, children: [_jsx("label", { htmlFor: "bulletinText", children: "Post to today's board" }), _jsx("textarea", { id: "bulletinText", value: bulletinDraft, onChange: (event) => setBulletinDraft(event.target.value), maxLength: 800, rows: 3, placeholder: "Share a reading update, quote, quick note, or pair it with one image..." }), _jsxs("div", { className: "bulletin-image-upload-row", children: [_jsx("label", { className: "bulletin-image-upload-button", htmlFor: "bulletinImageUpload", children: "Add image" }), _jsx("input", { id: "bulletinImageUpload", className: "bulletin-image-upload-input", type: "file", accept: "image/*", onChange: handleBulletinImageUpload }), bulletinImageDraft && (_jsx("button", { type: "button", className: "bulletin-image-remove-button", onClick: () => setBulletinImageDraft(''), children: "Remove image" }))] }), bulletinImageDraft && (_jsx("button", { type: "button", className: "bulletin-image-preview-card", onClick: () => setExpandedBulletinImage(bulletinImageDraft), "aria-label": "Open selected bulletin image", children: _jsx("img", { className: "bulletin-image-preview", src: bulletinImageDraft, alt: "Selected bulletin upload" }) })), _jsxs("div", { className: "bulletin-composer-actions", children: [_jsxs("span", { className: "bulletin-char-count", children: [bulletinDraft.trim().length, "/800"] }), _jsx("button", { type: "submit", disabled: isPostingBulletin || (!bulletinDraft.trim() && !bulletinImageDraft), children: isPostingBulletin ? 'Posting…' : 'Post' })] })] })] }))] }), expandedBulletinImage && (_jsx("div", { className: "bulletin-image-modal", role: "dialog", "aria-modal": "true", "aria-label": "Bulletin image viewer", onClick: () => setExpandedBulletinImage(null), children: _jsxs("div", { className: "bulletin-image-modal-dialog", onClick: (event) => event.stopPropagation(), children: [_jsx("button", { type: "button", className: "bulletin-image-modal-close", onClick: () => setExpandedBulletinImage(null), "aria-label": "Close bulletin image", children: "\u2715" }), _jsx("img", { className: "bulletin-image-modal-image", src: expandedBulletinImage, alt: "Expanded bulletin post" })] }) })), _jsxs("section", { className: `stats-card ${isStatsCollapsed ? 'stats-card-collapsed' : ''}`, "aria-label": "Daily statistics", children: [_jsxs("div", { className: "stats-card-header", children: [_jsx("h3", { children: "Statistics" }), _jsx("button", { type: "button", className: "profile-collapse-button", onClick: () => setIsStatsCollapsed((current) => !current), "aria-expanded": !isStatsCollapsed, "aria-controls": "statistics-panel-body", "aria-label": isStatsCollapsed ? 'Expand statistics' : 'Minimize statistics', title: isStatsCollapsed ? 'Expand statistics' : 'Minimize statistics', children: isStatsCollapsed ? '▢' : '—' })] }), !isStatsCollapsed && (_jsxs("div", { id: "statistics-panel-body", className: "stats-grid", children: [_jsxs("div", { className: "stats-item", children: [_jsx("span", { className: "stats-label", children: "Daily visits" }), _jsx("span", { className: "stats-value", children: dailyVisits })] }), _jsxs("div", { className: "stats-item", children: [_jsx("span", { className: "stats-label", children: "Daily users" }), _jsx("span", { className: "stats-value", children: dailyUsers })] }), _jsxs("div", { className: "stats-item", children: [_jsx("span", { className: "stats-label", children: "Reading time (all)" }), _jsx("span", { className: "stats-value", children: formatMinutesToDuration(totalReadingMinutes) })] }), _jsxs("div", { className: "stats-item", children: [_jsx("span", { className: "stats-label", children: "Active users" }), _jsxs("span", { className: "stats-value", children: [activeReaderCount, " / ", activeReaderLimit] })] }), _jsxs("div", { className: "stats-item", children: [_jsx("span", { className: "stats-label", children: "Observers" }), _jsx("span", { className: "stats-value", children: observerCount })] })] }))] }), _jsx("div", { className: "app-leave-row", children: _jsx("button", { type: "button", className: "secondary app-leave-button", onClick: (event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void handleLeave();
+                            }, children: "Leave the world, keep the story." }) }), _jsxs("div", { className: "login-links app-links", "aria-label": "External links", children: [_jsx("a", { href: "https://www.threads.com/@tothemax2050", target: "_blank", rel: "noreferrer", "aria-label": "Open Threads page", title: "My @Tothemax2050 Threads Page", children: _jsx("img", { className: "login-link-threads-icon", src: `${import.meta.env.BASE_URL}Threads.webp`, alt: "" }) }), _jsx("a", { href: "https://readingisalifestyle.com", target: "_blank", rel: "noreferrer", "aria-label": "Open home page", title: "My Reading Is A Lifestyle Homepage", className: "login-link-image-link", children: _jsx("img", { className: "login-link-home-image", src: `${import.meta.env.BASE_URL}homepage.webp`, alt: "" }) })] })] }))] }));
 }
 export default App;
 //# sourceMappingURL=App.js.map

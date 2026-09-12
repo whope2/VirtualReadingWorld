@@ -79,7 +79,8 @@ curl http://localhost:4000/api/profile/Fox
       "format": "physical",
       "progressMode": "pages",
       "currentProgress": 120,
-      "totalProgress": 420
+      "totalProgress": 420,
+      "currentRating": 4.5
     },
     {
       "title": "",
@@ -87,7 +88,8 @@ curl http://localhost:4000/api/profile/Fox
       "format": "physical",
       "progressMode": "pages",
       "currentProgress": 0,
-      "totalProgress": 0
+      "totalProgress": 0,
+      "currentRating": 0
     },
     {
       "title": "",
@@ -95,7 +97,8 @@ curl http://localhost:4000/api/profile/Fox
       "format": "physical",
       "progressMode": "pages",
       "currentProgress": 0,
-      "totalProgress": 0
+      "totalProgress": 0,
+      "currentRating": 0
     }
   ],
   "currentBook": "King Sorrow",
@@ -125,6 +128,7 @@ Each `books[i]` item:
 - `progressMode`: `pages | audio` (derived from format in server logic)
 - `currentProgress`: non-negative integer
 - `totalProgress`: non-negative integer
+- `currentRating`: number between `0` and `5`, supporting half stars like `3.5` and `4.5`; `0` means “Not rated”
 
 #### Example: remove a user
 ```bash
