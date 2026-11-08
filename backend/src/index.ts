@@ -6,7 +6,7 @@ import path from 'node:path';
 
 dotenv.config();
 
-const { ensureSchema, getProfile, createProfile, updateProfile, listProfiles, listAllProfiles, getActiveProfileCount, getActiveReaderLimit, setActiveReaderLimit, resetActiveReaders, listDailyBulletinPosts, createDailyBulletinPost, setDailyBulletinPostLike, deleteDailyBulletinPost, deleteDailyBulletinPostByAuthor, resetDailyBulletinBoard, getDailyVisitStats, recordDailyVisit, dbType } = require('./db') as typeof import('./db');
+const { ensureSchema, getProfile, createProfile, updateProfile, listProfiles, listAllProfiles, getActiveProfileCount, getActiveReaderLimit, setActiveReaderLimit, resetActiveReaders, listDailyBulletinPosts, createDailyBulletinPost, setDailyBulletinPostLike, deleteDailyBulletinPost, deleteDailyBulletinPostByAuthor, resetDailyBulletinBoard, getDailyVisitStats, recordDailyVisit, getTopDailyReaders, recordLoginStreak, enterGhostMode, reactivateFromGhost, listChatMessages, createChatMessage, deleteChatMessageByAuthor, deleteChatMessage, setChatMessageLike, setProfileStatusLike, createChatPing, listChatPings, clearChatPings, maintainChatRetention, dbType } = require('./db') as typeof import('./db');
 
 export const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -119,6 +119,29 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+async function handleStatusLike(req: express.Request, res: express.Response, delta: 1 | -1) {
+  const username = String(req.params.username || '').trim();
+  const status = typeof req.body?.status === 'string' ? req.body.status : null;
+
+  if (!username) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+  if (status === null) {
+    return res.status(400).json({ error: 'status is required' });
+  }
+
+  try {
+    const result = await setProfileStatusLike(username, status, delta);
+    if (!result) {
+      return res.status(404).json({ error: 'Profile not found.' });
+    }
+    return res.json({ username, ...result });
+  } catch (error) {
+    console.error('status-like error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
 app.get('/api/profile/:username', async (req, res) => {
   const username = String(req.params.username || '').trim();
   if (!username) {
@@ -139,7 +162,10 @@ app.get('/api/profile/:username', async (req, res) => {
     let shouldRecordDailyVisit = false;
     const hasLoginTimestamp = Number.isFinite(Number(profile.loginTimeUtc)) && Number(profile.loginTimeUtc) > 0;
 
-    if (!profile.isActive) {
+    if (profile.isGhost) {
+      profile = await reactivateFromGhost(profile.username) ?? profile;
+      shouldRecordDailyVisit = true;
+    } else if (!profile.isActive) {
       const activeCount = await getActiveProfileCount();
       const limit = await getActiveReaderLimit();
       if (activeCount >= limit) {
@@ -168,7 +194,14 @@ app.get('/api/profile/:username', async (req, res) => {
       }
     }
 
-    return res.json(profile);
+    let dayStreak = 0;
+    try {
+      dayStreak = await recordLoginStreak(profile.username);
+    } catch (error) {
+      console.warn('Unable to record login streak', error);
+    }
+
+    return res.json({ ...profile, dayStreak });
   } catch (error) {
     console.error('GET /api/profile error', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -187,6 +220,11 @@ app.put('/api/profile/:username', async (req, res) => {
     let profile = await getProfile(username);
     if (!profile) {
       profile = await createProfile(username);
+    }
+
+    // Any client update from a ghost reader means they are back.
+    if (profile.isGhost && isActive !== false) {
+      profile = await reactivateFromGhost(username) ?? profile;
     }
 
     const parsedPage = currentPage !== undefined ? Number(currentPage) : profile.currentPage;
@@ -294,6 +332,9 @@ app.put('/api/profile/:username', async (req, res) => {
       backgroundScene: parsedBackgroundScene,
       isActive: parsedIsActive,
       loginTimeUtc: finalLoginTimeUtc,
+      isGhost: profile.isGhost,
+      statusLikeCount: profile.statusLikeCount,
+      recentStatuses: profile.recentStatuses,
     }, true);
 
     return res.json(updatedProfile);
@@ -318,17 +359,21 @@ app.post('/api/profile/:username/deactivate', async (req, res) => {
       return res.json({ success: true, isActive: false });
     }
 
-    const updatedProfile = await updateProfile({
-      ...profile,
-      isActive: false,
-      loginTimeUtc: 0,
-    }, false);
+    const updatedProfile = await enterGhostMode(username);
 
-    return res.json({ success: true, isActive: updatedProfile.isActive });
+    return res.json({ success: true, isActive: updatedProfile?.isActive ?? false, isGhost: updatedProfile?.isGhost ?? false });
   } catch (error) {
     console.error('POST /api/profile/:username/deactivate error', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.post('/api/profile/:username/status-like', async (req, res) => {
+  await handleStatusLike(req, res, 1);
+});
+
+app.delete('/api/profile/:username/status-like', async (req, res) => {
+  await handleStatusLike(req, res, -1);
 });
 
 app.post('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
@@ -585,6 +630,181 @@ app.post('/api/admin/bulletin/reset', async (req, res) => {
   }
 });
 
+app.get('/api/chat/messages', async (req, res) => {
+  try {
+    const day = typeof req.query.day === 'string' ? req.query.day : '';
+    const after = Number(req.query.after ?? 0);
+    const result = await listChatMessages(day, after);
+    return res.json(result);
+  } catch (error) {
+    console.error('GET /api/chat/messages error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/chat/messages', async (req, res) => {
+  const author = String(req.body?.author || '').trim();
+  const text = String(req.body?.text || '').trim();
+  const avatarIcon = typeof req.body?.avatarIcon === 'string' ? req.body.avatarIcon : undefined;
+  const avatarImageData = typeof req.body?.avatarImageData === 'string' ? req.body.avatarImageData : undefined;
+  const imageData = typeof req.body?.imageData === 'string' ? req.body.imageData : undefined;
+  const toUsername = typeof req.body?.toUsername === 'string' ? req.body.toUsername : undefined;
+  const toAvatarIcon = typeof req.body?.toAvatarIcon === 'string' ? req.body.toAvatarIcon : undefined;
+  const toAvatarImageData = typeof req.body?.toAvatarImageData === 'string' ? req.body.toAvatarImageData : undefined;
+  const bookTitle = typeof req.body?.bookTitle === 'string' ? req.body.bookTitle : undefined;
+
+  if (!author) {
+    return res.status(400).json({ error: 'author is required' });
+  }
+  if (!text && !imageData) {
+    return res.status(400).json({ error: 'text or image is required' });
+  }
+
+  try {
+    const message = await createChatMessage({ author, text, avatarIcon, avatarImageData, imageData, toUsername, toAvatarIcon, toAvatarImageData, bookTitle });
+    return res.status(201).json(message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to send message.';
+    if (message.includes('required')) {
+      return res.status(400).json({ error: message });
+    }
+    console.error('POST /api/chat/messages error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/chat/messages/:messageId/like', async (req, res) => {
+  const messageId = Number(req.params.messageId);
+  if (!Number.isInteger(messageId) || messageId < 1) {
+    return res.status(400).json({ error: 'messageId must be a positive integer' });
+  }
+
+  try {
+    const message = await setChatMessageLike(messageId, 1);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+    return res.json(message);
+  } catch (error) {
+    console.error('POST /api/chat/messages/:messageId/like error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/chat/messages/:messageId/like', async (req, res) => {
+  const messageId = Number(req.params.messageId);
+  if (!Number.isInteger(messageId) || messageId < 1) {
+    return res.status(400).json({ error: 'messageId must be a positive integer' });
+  }
+
+  try {
+    const message = await setChatMessageLike(messageId, -1);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+    return res.json(message);
+  } catch (error) {
+    console.error('DELETE /api/chat/messages/:messageId/like error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/chat/messages/:messageId', async (req, res) => {
+  const messageId = Number(req.params.messageId);
+  const author = String(req.body?.author || '').trim();
+
+  if (!Number.isInteger(messageId) || messageId < 1) {
+    return res.status(400).json({ error: 'messageId must be a positive integer' });
+  }
+  if (!author) {
+    return res.status(400).json({ error: 'author is required' });
+  }
+
+  try {
+    const result = await deleteChatMessageByAuthor(messageId, author);
+    if (result === 'not-found') {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+    if (result === 'forbidden') {
+      return res.status(403).json({ error: 'Only the author can delete this message.' });
+    }
+    return res.json({ success: true, messageId });
+  } catch (error) {
+    console.error('DELETE /api/chat/messages/:messageId error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/admin/chat/messages/:messageId', async (req, res) => {
+  if (!requireLocalAdmin(req, res)) {
+    return;
+  }
+
+  const messageId = Number(req.params.messageId);
+  if (!Number.isInteger(messageId) || messageId < 1) {
+    return res.status(400).json({ error: 'messageId must be a positive integer' });
+  }
+
+  try {
+    const removed = await deleteChatMessage(messageId);
+    if (!removed) {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+    return res.json({ success: true, messageId });
+  } catch (error) {
+    console.error('DELETE /api/admin/chat/messages/:messageId error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/chat/pings', async (req, res) => {
+  const from = String(req.body?.from || '').trim();
+  const to = String(req.body?.to || '').trim();
+  const bookTitle = typeof req.body?.bookTitle === 'string' ? req.body.bookTitle : '';
+
+  if (!from || !to) {
+    return res.status(400).json({ error: 'from and to are required' });
+  }
+
+  try {
+    await createChatPing({ from, to, bookTitle });
+    return res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('POST /api/chat/pings error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/chat/pings/:username', async (req, res) => {
+  const username = String(req.params.username || '').trim();
+  if (!username) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+
+  try {
+    const pings = await listChatPings(username);
+    return res.json({ count: pings.length, pings });
+  } catch (error) {
+    console.error('GET /api/chat/pings/:username error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/chat/pings/:username', async (req, res) => {
+  const username = String(req.params.username || '').trim();
+  if (!username) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+
+  try {
+    await clearChatPings(username);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('DELETE /api/chat/pings/:username error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/profiles', async (_req, res) => {
   try {
     const profiles = await listProfiles();
@@ -670,9 +890,10 @@ app.get('/api/stats/daily', async (_req, res) => {
   try {
     pruneInactiveObservers();
     const activeReaders = await getActiveProfileCount();
-    const [stats, limit] = await Promise.all([
+    const [stats, limit, topReaders] = await Promise.all([
       getDailyVisitStats(),
       getActiveReaderLimit(),
+      getTopDailyReaders(3),
     ]);
 
     return res.json({
@@ -683,6 +904,7 @@ app.get('/api/stats/daily', async (_req, res) => {
       activeReaders,
       activeReaderLimit: limit,
       observers: observerActivity.size,
+      topReaders,
     });
   } catch (error) {
     console.error('GET /api/stats/daily error', error);
@@ -739,6 +961,7 @@ export async function start() {
     // Keep bulletin board scoped to current ET day even during idle periods.
     setInterval(() => {
       void listDailyBulletinPosts().catch(() => undefined);
+      void maintainChatRetention().catch(() => undefined);
     }, 5 * 60 * 1000);
   } catch (error) {
     console.error('Startup error', error);

@@ -20,6 +20,10 @@ type Profile = {
   isActive: boolean;
   loginTimeUtc?: number;
   isObserver?: boolean;
+  dayStreak?: number;
+  isGhost?: boolean;
+  statusLikeCount?: number;
+  recentStatuses?: string[];
 };
 
 type SceneReader = Profile;
@@ -131,6 +135,11 @@ type AnnouncementPayload = {
   message?: string;
 };
 
+type DailyTopReader = {
+  username?: string;
+  minutes?: number;
+};
+
 type DailyStatsPayload = {
   dayKey?: string;
   dailyVisits?: number;
@@ -139,6 +148,7 @@ type DailyStatsPayload = {
   activeReaders?: number;
   activeReaderLimit?: number;
   observers?: number;
+  topReaders?: DailyTopReader[];
 };
 
 type BulletinPost = {
@@ -150,6 +160,35 @@ type BulletinPost = {
   text: string;
   imageData: string;
   likeCount: number;
+  createdAt: number;
+};
+
+type ChatMessage = {
+  dayKey: string;
+  messageId: number;
+  author: string;
+  avatarIcon: string;
+  avatarImageData: string;
+  text: string;
+  imageData: string;
+  createdAt: number;
+  toUsername: string;
+  toAvatarIcon: string;
+  toAvatarImageData: string;
+  bookTitle: string;
+  likeCount: number;
+};
+
+type ChatTarget = {
+  username: string;
+  avatarIcon: string;
+  avatarImageData: string;
+  bookTitle: string;
+};
+
+type ChatPing = {
+  fromUsername: string;
+  bookTitle: string;
   createdAt: number;
 };
 
@@ -342,6 +381,38 @@ function normalizeBulletinPost(value: unknown): BulletinPost | null {
     imageData,
     likeCount: normalizeLikeCount(source.likeCount),
     createdAt: Math.floor(createdAt),
+  };
+}
+
+function normalizeChatMessage(value: unknown): ChatMessage | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  const messageId = Number(source.messageId);
+  const createdAt = Number(source.createdAt);
+  const dayKey = typeof source.dayKey === 'string' ? source.dayKey : '';
+  const author = typeof source.author === 'string' ? source.author : '';
+  const text = typeof source.text === 'string' ? source.text : '';
+  const imageData = typeof source.imageData === 'string' ? source.imageData : '';
+  const toUsername = typeof source.toUsername === 'string' ? source.toUsername : '';
+  if (!dayKey || !author || (!text && !imageData) || !Number.isFinite(messageId) || messageId < 1 || !Number.isFinite(createdAt) || createdAt <= 0) {
+    return null;
+  }
+  return {
+    dayKey,
+    messageId: Math.floor(messageId),
+    author,
+    avatarIcon: typeof source.avatarIcon === 'string' && source.avatarIcon.trim() ? source.avatarIcon : '📚',
+    avatarImageData: typeof source.avatarImageData === 'string' ? source.avatarImageData : '',
+    text,
+    imageData,
+    createdAt: Math.floor(createdAt),
+    toUsername,
+    toAvatarIcon: toUsername && typeof source.toAvatarIcon === 'string' && source.toAvatarIcon.trim() ? source.toAvatarIcon : '📚',
+    toAvatarImageData: toUsername && typeof source.toAvatarImageData === 'string' ? source.toAvatarImageData : '',
+    bookTitle: toUsername && typeof source.bookTitle === 'string' ? source.bookTitle : '',
+    likeCount: normalizeLikeCount(source.likeCount),
   };
 }
 
@@ -662,6 +733,18 @@ function formatProgressDisplay(current: number, total: number, mode: ProgressMod
   return `${Math.max(0, Math.floor(current ?? 0))} / ${Math.max(0, Math.floor(total ?? 0))}`;
 }
 
+function formatProgressPercent(current: number | null | undefined, total: number | null | undefined): string | null {
+  if (current == null || total == null) {
+    return null;
+  }
+  const safeCurrent = Number(current);
+  const safeTotal = Number(total);
+  if (!Number.isFinite(safeCurrent) || !Number.isFinite(safeTotal) || safeTotal <= 0 || safeCurrent < 0) {
+    return null;
+  }
+  return `${Math.min(100, Math.round((safeCurrent / safeTotal) * 100))}%`;
+}
+
 function progressLabel(mode: ProgressMode): string {
   return mode === 'audio' ? 'Time' : 'Page';
 }
@@ -753,6 +836,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [avatarPosition, setAvatarPosition] = useState(DEFAULT_POSITION);
   const [statusText, setStatusText] = useState('Reading');
+  const [isRecentStatusListOpen, setIsRecentStatusListOpen] = useState(false);
   const [scenePreview, setScenePreview] = useState('ocean-beach');
   const [avatarIconDraft, setAvatarIconDraft] = useState('📚');
   const [avatarImageData, setAvatarImageData] = useState('');
@@ -767,6 +851,7 @@ function App() {
   const [dailyVisits, setDailyVisits] = useState(0);
   const [dailyUsers, setDailyUsers] = useState(0);
   const [totalReadingMinutes, setTotalReadingMinutes] = useState(0);
+  const [topDailyReaders, setTopDailyReaders] = useState<DailyTopReader[]>([]);
   const [isProfileCollapsed, setIsProfileCollapsed] = useState(false);
   const [loginMode, setLoginMode] = useState<LoginMode>('reader');
   const [browserNow, setBrowserNow] = useState(Date.now());
@@ -781,6 +866,25 @@ function App() {
   const [pendingBulletinLikeKey, setPendingBulletinLikeKey] = useState<string | null>(null);
   const [pendingBulletinDeleteKey, setPendingBulletinDeleteKey] = useState<string | null>(null);
   const [likedBulletinSessionKeys, setLikedBulletinSessionKeys] = useState<Set<string>>(new Set());
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatTarget, setChatTarget] = useState<ChatTarget | null>(null);
+  const [pendingChatDeleteId, setPendingChatDeleteId] = useState<number | null>(null);
+  const [pendingChatLikeId, setPendingChatLikeId] = useState<number | null>(null);
+  const [pendingStatusLikeKey, setPendingStatusLikeKey] = useState<string | null>(null);
+  const [likedStatusSessionKeys, setLikedStatusSessionKeys] = useState<Set<string>>(new Set());
+  const [myStatusLikeCount, setMyStatusLikeCount] = useState(0);
+  const [likedChatSessionKeys, setLikedChatSessionKeys] = useState<Set<string>>(new Set());
+  const [chatImageDraft, setChatImageDraft] = useState('');
+  const [isPostingChat, setIsPostingChat] = useState(false);
+  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [chatPings, setChatPings] = useState<ChatPing[]>([]);
+  const chatBoardRef = useRef<HTMLElement>(null);
+  const chatFeedRef = useRef<HTMLDivElement>(null);
+  const chatTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatDayKeyRef = useRef('');
+  const chatLastIdRef = useRef(0);
+  const chatStickToBottomRef = useRef(true);
   const [isForestSoundEnabled, setIsForestSoundEnabled] = useState(false);
   const [isRainSoundEnabled, setIsRainSoundEnabled] = useState(false);
   const [isSceneImmersive, setIsSceneImmersive] = useState(false);
@@ -803,6 +907,8 @@ function App() {
   const sessionVersionRef = useRef(0);
   const likeStorageKey = profile?.username ? `vwr-liked-books:${profile.username}` : null;
   const bulletinLikeStorageKey = profile?.username ? `vwr-liked-bulletin:${profile.username}` : null;
+  const chatLikeStorageKey = profile?.username ? `vwr-liked-chat:${profile.username}` : null;
+  const statusLikeStorageKey = profile?.username ? `vwr-liked-status:${profile.username}` : null;
 
   useEffect(() => {
     const storedName = localStorage.getItem('vwr-username');
@@ -880,8 +986,23 @@ function App() {
     if (!profile) {
       setPinnedReaderUsername(null);
       setHoveredReaderUsername(null);
+      setChatMessages([]);
+      setChatPings([]);
+      setChatDraft('');
+      setChatTarget(null);
+      setChatImageDraft('');
+      chatDayKeyRef.current = '';
+      chatLastIdRef.current = 0;
+      chatStickToBottomRef.current = true;
     }
   }, [profile]);
+
+  useEffect(() => {
+    const feed = chatFeedRef.current;
+    if (feed && chatStickToBottomRef.current) {
+      feed.scrollTop = 0;
+    }
+  }, [chatMessages, isChatCollapsed]);
 
   useEffect(() => {
     profileFormRef.current = profileForm;
@@ -974,6 +1095,58 @@ function App() {
     }
     window.sessionStorage.setItem(bulletinLikeStorageKey, JSON.stringify(Array.from(likedBulletinSessionKeys)));
   }, [likedBulletinSessionKeys, profile?.username, bulletinLikeStorageKey]);
+
+  useEffect(() => {
+    if (!profile?.username || !chatLikeStorageKey) {
+      setLikedChatSessionKeys(new Set());
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(window.sessionStorage.getItem(chatLikeStorageKey) || '[]');
+      if (Array.isArray(parsed)) {
+        setLikedChatSessionKeys(new Set(parsed.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry))));
+        return;
+      }
+    } catch {
+      // ignore malformed payload
+    }
+
+    setLikedChatSessionKeys(new Set());
+  }, [profile?.username, chatLikeStorageKey]);
+
+  useEffect(() => {
+    if (!profile?.username || !chatLikeStorageKey) {
+      return;
+    }
+    window.sessionStorage.setItem(chatLikeStorageKey, JSON.stringify(Array.from(likedChatSessionKeys)));
+  }, [likedChatSessionKeys, profile?.username, chatLikeStorageKey]);
+
+  useEffect(() => {
+    if (!profile?.username || !statusLikeStorageKey) {
+      setLikedStatusSessionKeys(new Set());
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(window.sessionStorage.getItem(statusLikeStorageKey) || '[]');
+      if (Array.isArray(parsed)) {
+        setLikedStatusSessionKeys(new Set(parsed.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry))));
+        return;
+      }
+    } catch {
+      // ignore malformed payload
+    }
+
+    setLikedStatusSessionKeys(new Set());
+  }, [profile?.username, statusLikeStorageKey]);
+
+  useEffect(() => {
+    if (!profile?.username || !statusLikeStorageKey) {
+      return;
+    }
+    window.sessionStorage.setItem(statusLikeStorageKey, JSON.stringify(Array.from(likedStatusSessionKeys)));
+  }, [likedStatusSessionKeys, profile?.username, statusLikeStorageKey]);
 
   useEffect(() => {
     if (profile) {
@@ -1429,6 +1602,9 @@ function App() {
         if (typeof data?.observers === 'number' && Number.isFinite(data.observers) && data.observers >= 0) {
           setObserverCount(Math.floor(data.observers));
         }
+        if (Array.isArray(data?.topReaders)) {
+          setTopDailyReaders(data.topReaders.slice(0, 3));
+        }
       })
       .catch(() => undefined);
   };
@@ -1481,11 +1657,94 @@ function App() {
       .catch(() => undefined);
   };
 
+  const loadChatMessages = () => {
+    const requestDay = chatDayKeyRef.current;
+    const requestAfter = chatLastIdRef.current;
+
+    fetch(apiUrl(`/api/chat/messages?day=${encodeURIComponent(requestDay)}&after=${requestAfter}&ts=${Date.now()}`), { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || typeof data.dayKey !== 'string' || !Array.isArray(data.messages)) {
+          return;
+        }
+        const incoming = (data.messages as unknown[])
+          .map((entry) => normalizeChatMessage(entry))
+          .filter((entry): entry is ChatMessage => Boolean(entry));
+
+        if (data.dayKey !== chatDayKeyRef.current) {
+          chatDayKeyRef.current = data.dayKey;
+          chatLastIdRef.current = incoming.reduce((max, entry) => Math.max(max, entry.messageId), 0);
+          setChatMessages(incoming);
+          return;
+        }
+
+        if (incoming.length > 0) {
+          chatLastIdRef.current = incoming.reduce((max, entry) => Math.max(max, entry.messageId), chatLastIdRef.current);
+        }
+        const liveIds = Array.isArray(data.messageIds) ? new Set<number>((data.messageIds as unknown[]).map((id) => Number(id))) : null;
+        const likeCounts = data.likeCounts && typeof data.likeCounts === 'object' ? data.likeCounts as Record<string, unknown> : null;
+        setChatMessages((current) => {
+          const known = new Set(current.map((entry) => entry.messageId));
+          const fresh = incoming.filter((entry) => !known.has(entry.messageId));
+          const kept = liveIds ? current.filter((entry) => liveIds.has(entry.messageId)) : current;
+          let countsChanged = false;
+          const synced = likeCounts
+            ? kept.map((entry) => {
+              const latest = likeCounts[String(entry.messageId)];
+              if (latest === undefined) {
+                return entry;
+              }
+              const nextCount = normalizeLikeCount(latest);
+              if (nextCount === entry.likeCount) {
+                return entry;
+              }
+              countsChanged = true;
+              return { ...entry, likeCount: nextCount };
+            })
+            : kept;
+          if (fresh.length === 0 && kept.length === current.length && !countsChanged) {
+            return current;
+          }
+          return [...synced, ...fresh].sort((a, b) => a.messageId - b.messageId);
+        });
+      })
+      .catch(() => undefined);
+  };
+
+  const loadChatPings = (name: string) => {
+    fetch(apiUrl(`/api/chat/pings/${encodeURIComponent(name)}?ts=${Date.now()}`), { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || !Array.isArray(data.pings)) {
+          return;
+        }
+        const next: ChatPing[] = (data.pings as Array<Record<string, unknown>>)
+          .filter((entry) => typeof entry?.fromUsername === 'string' && entry.fromUsername)
+          .map((entry) => ({
+            fromUsername: String(entry.fromUsername),
+            bookTitle: typeof entry.bookTitle === 'string' ? entry.bookTitle : '',
+            createdAt: Number(entry.createdAt) || 0,
+          }));
+        setChatPings((current) => (
+          current.length === next.length && current.every((ping, index) => ping.fromUsername === next[index].fromUsername && ping.createdAt === next[index].createdAt)
+            ? current
+            : next
+        ));
+      })
+      .catch(() => undefined);
+  };
+
   const refreshSceneData = (usernameOverride?: string) => {
     void loadActiveReaderLimit();
     void loadObserverCount();
     void loadDailyStats();
     void loadBulletinPosts();
+
+    const currentReader = profileRef.current;
+    if (currentReader && !currentReader.isObserver) {
+      void loadChatMessages();
+      void loadChatPings(usernameOverride ?? currentReader.username);
+    }
 
     const attempts = [0, 150, 400, 1000];
     attempts.forEach((delay, index) => {
@@ -1541,6 +1800,11 @@ function App() {
         }
 
         if (Array.isArray(data)) {
+          // Own count is kept out of `profile` so a like never resets the editing form.
+          const mine = data.find((item) => item.username === activeUsername);
+          if (mine) {
+            setMyStatusLikeCount(normalizeLikeCount(mine.statusLikeCount));
+          }
           const normalized = data
             .filter((item) => item.username !== activeUsername)
             .map((item) => ({
@@ -1894,10 +2158,16 @@ function App() {
         status: nextStatus,
         backgroundScene: profileForm.backgroundScene || leavingProfile.backgroundScene || 'ocean-beach',
         avatarIcon: leavingProfile.avatarIcon,
-        isActive: false,
-        loginTimeUtc: 0,
       }),
-    }).catch(() => undefined);
+    })
+      .then(() => fetch(apiUrl(`/api/profile/${encodeURIComponent(leavingProfile.username)}/deactivate?ts=${Date.now()}`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      }))
+      .catch(() => undefined);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1977,6 +2247,53 @@ function App() {
 
   const safeEditingBookIndex = clampBookIndex(profileForm.editingBookIndex);
   const activeReaderCount = profile?.isObserver ? otherReaders.length : otherReaders.length + 1;
+
+  // Recipients for the chat dropdown: people who wrote to you, readers here now, then anyone else in today's chat.
+  const chatMe = profile?.username ?? '';
+  const chatAuthorAvatars = new Map<string, { avatarIcon: string; avatarImageData: string }>();
+  const chatWroteToMe = new Set<string>();
+  for (const entry of chatMessages) {
+    if (entry.author === chatMe) {
+      continue;
+    }
+    chatAuthorAvatars.set(entry.author, { avatarIcon: entry.avatarIcon, avatarImageData: entry.avatarImageData });
+    if (entry.toUsername === chatMe) {
+      chatWroteToMe.add(entry.author);
+    }
+  }
+  const chatPresentNames = new Set(otherReaders.filter((reader) => reader.username !== chatMe && !reader.isGhost).map((reader) => reader.username));
+  const chatRecipientGroups = (() => {
+    const taken = new Set<string>();
+    const take = (names: string[]) => names
+      .sort((a, b) => a.localeCompare(b))
+      .filter((name) => {
+        if (!name || name === chatMe || taken.has(name)) {
+          return false;
+        }
+        taken.add(name);
+        return true;
+      });
+    const wroteToYou = take(Array.from(chatWroteToMe));
+    const active = take(Array.from(chatPresentNames));
+    const others = take([...Array.from(chatAuthorAvatars.keys()), ...(chatTarget ? [chatTarget.username] : [])]);
+    return { wroteToYou, active, others };
+  })();
+  const handleChatRecipientChange = (username: string) => {
+    if (!username) {
+      setChatTarget(null);
+      return;
+    }
+    const present = otherReaders.find((reader) => reader.username === username);
+    const author = chatAuthorAvatars.get(username);
+    const avatarIcon = present?.avatarIcon || author?.avatarIcon || '📚';
+    const avatarImageData = present?.avatarImageData || author?.avatarImageData || '';
+    setChatTarget((current) => ({
+      username,
+      avatarIcon,
+      avatarImageData,
+      bookTitle: current?.username === username ? current.bookTitle : '',
+    }));
+  };
   const isEditingBetweenBooks = safeEditingBookIndex === BETWEEN_BOOKS_INDEX;
   const editingBook = profileForm.books[safeEditingBookIndex] ?? profileForm.books[0] ?? {
     title: '',
@@ -1987,6 +2304,10 @@ function App() {
     totalProgress: '0',
   };
   const editingBookMode = progressModeForFormat(editingBook?.format ?? 'physical');
+  const editingProgressPercent = formatProgressPercent(
+    parseDraftProgress(editingBook.currentProgress, editingBookMode),
+    parseDraftProgress(editingBook.totalProgress, editingBookMode),
+  );
   const currentBookSlotLabels = BOOK_SLOT_OPTIONS.map((slot) => {
     if (slot.index === BETWEEN_BOOKS_INDEX) {
       return BETWEEN_BOOKS_TITLE;
@@ -2017,6 +2338,29 @@ function App() {
       return <img className="avatar-image" src={reader.avatarImageData} alt="" />;
     }
     return <span role="img" aria-label="reader">{reader.avatarIcon || fallbackIcon}</span>;
+  };
+
+  const renderStatusLike = (reader: SceneReader, isSelf: boolean) => {
+    const count = isSelf ? myStatusLikeCount : normalizeLikeCount(reader.statusLikeCount);
+    const sessionKey = `${reader.username}::${reader.status}`;
+    const liked = likedStatusSessionKeys.has(sessionKey);
+    const disabled = !profile || profile.isObserver || pendingStatusLikeKey === sessionKey;
+
+    return (
+      <span className="status-like">
+        <button
+          type="button"
+          className={`status-like-button ${liked ? 'status-like-button-done' : ''}`}
+          onClick={(event) => toggleStatusLike(event, reader)}
+          disabled={disabled}
+          aria-label={liked ? 'Unlike this status' : 'Like this status'}
+          title={liked ? 'Unlike this status' : 'Like this status'}
+        >
+          {liked ? '♥' : '♡'}
+        </button>
+        {count > 0 && <span className="status-like-count" aria-live="polite">{count}</span>}
+      </span>
+    );
   };
 
   const renderReadingTimeBadge = (reader: { username: string; loginTimeUtc?: number; isObserver?: boolean }) => {
@@ -2155,6 +2499,10 @@ function App() {
       return;
     }
 
+    if (!window.confirm('Are you sure you want to delete this post?')) {
+      return;
+    }
+
     setPendingBulletinDeleteKey(sessionKey);
     try {
       const response = await fetch(apiUrl(`/api/bulletin/posts/${post.postId}?ts=${Date.now()}`), {
@@ -2197,6 +2545,283 @@ function App() {
         padToBounds: false,
       });
       setBulletinImageDraft(dataUrl);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to upload image.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const acknowledgeChatPings = () => {
+    if (!profile || profile.isObserver || chatPings.length === 0) {
+      return;
+    }
+    setChatPings([]);
+    void fetch(apiUrl(`/api/chat/pings/${encodeURIComponent(profile.username)}?ts=${Date.now()}`), { method: 'DELETE' }).catch(() => undefined);
+  };
+
+  const focusChatComposer = () => {
+    window.setTimeout(() => {
+      chatBoardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const textarea = chatTextareaRef.current;
+      if (textarea) {
+        textarea.focus();
+        const end = textarea.value.length;
+        textarea.setSelectionRange(end, end);
+      }
+    }, 80);
+  };
+
+  const startChatAbout = (event: React.MouseEvent<HTMLButtonElement>, reader: SceneReader, bookTitle: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!profile || profile.isObserver || reader.username === profile.username) {
+      return;
+    }
+
+    const title = bookTitle.trim();
+
+    setIsChatCollapsed(false);
+    setChatTarget({
+      username: reader.username,
+      avatarIcon: reader.avatarIcon || '📚',
+      avatarImageData: reader.avatarImageData || '',
+      bookTitle: title,
+    });
+    setPinnedReaderUsername(null);
+    setHoveredReaderUsername(null);
+    if (isSceneImmersive || isSceneNativeFullscreen) {
+      void exitSceneFullscreen();
+    }
+
+    void fetch(apiUrl(`/api/chat/pings?ts=${Date.now()}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: profile.username, to: reader.username, bookTitle: title }),
+    }).catch(() => undefined);
+
+    focusChatComposer();
+  };
+
+  const submitChatMessage = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    if (!profile || profile.isObserver || isPostingChat) {
+      return;
+    }
+
+    const text = chatDraft.trim();
+    if (!text && !chatImageDraft) {
+      return;
+    }
+
+    setIsPostingChat(true);
+    try {
+      const response = await fetch(apiUrl(`/api/chat/messages?ts=${Date.now()}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          author: profile.username,
+          avatarIcon: profile.avatarIcon,
+          avatarImageData: profile.avatarImageData || '',
+          text,
+          imageData: chatImageDraft,
+          ...(chatTarget ? {
+            toUsername: chatTarget.username,
+            toAvatarIcon: chatTarget.avatarIcon,
+            toAvatarImageData: chatTarget.avatarImageData,
+            bookTitle: chatTarget.bookTitle,
+          } : {}),
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.error || 'Unable to send message.');
+        return;
+      }
+
+      const normalized = normalizeChatMessage(data);
+      if (!normalized) {
+        setError('Unable to send message.');
+        return;
+      }
+
+      setChatDraft('');
+      // The recipient stays selected for back-and-forth chat; the book note applies to the first message only.
+      setChatTarget((current) => (current ? { ...current, bookTitle: '' } : current));
+      setChatImageDraft('');
+      chatStickToBottomRef.current = true;
+      // The poll cursor is left alone so messages from others with lower ids are not skipped.
+      setChatMessages((current) => (
+        current.some((entry) => entry.messageId === normalized.messageId && entry.dayKey === normalized.dayKey)
+          ? current
+          : [...current, normalized].sort((a, b) => a.messageId - b.messageId)
+      ));
+      acknowledgeChatPings();
+      if (chatTarget) {
+        void fetch(apiUrl(`/api/chat/pings?ts=${Date.now()}`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: profile.username, to: chatTarget.username, bookTitle: chatTarget.bookTitle }),
+        }).catch(() => undefined);
+      }
+    } catch {
+      setError('Unable to reach backend.');
+    } finally {
+      setIsPostingChat(false);
+    }
+  };
+
+  const toggleStatusLike = async (event: React.MouseEvent<HTMLButtonElement>, reader: SceneReader) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!profile || profile.isObserver) {
+      return;
+    }
+
+    const statusAtClick = reader.status;
+    const sessionKey = `${reader.username}::${statusAtClick}`;
+    const alreadyLiked = likedStatusSessionKeys.has(sessionKey);
+    if (pendingStatusLikeKey === sessionKey) {
+      return;
+    }
+
+    setPendingStatusLikeKey(sessionKey);
+    try {
+      const response = await fetch(apiUrl(`/api/profile/${encodeURIComponent(reader.username)}/status-like?ts=${Date.now()}`), {
+        method: alreadyLiked ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: statusAtClick }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.error || 'Unable to like this status right now.');
+        return;
+      }
+
+      const nextCount = normalizeLikeCount(data?.statusLikeCount);
+      if (reader.username === profile.username) {
+        setMyStatusLikeCount(nextCount);
+      } else {
+        setOtherReaders((current) => current.map((entry) => (
+          entry.username === reader.username ? { ...entry, statusLikeCount: nextCount } : entry
+        )));
+      }
+
+      // A stale click (the reader changed status meanwhile) is not remembered as a like.
+      if (data?.applied) {
+        setLikedStatusSessionKeys((current) => {
+          const next = new Set(current);
+          if (alreadyLiked) {
+            next.delete(sessionKey);
+          } else {
+            next.add(sessionKey);
+          }
+          return next;
+        });
+      }
+    } catch {
+      setError('Unable to reach backend.');
+    } finally {
+      setPendingStatusLikeKey((current) => (current === sessionKey ? null : current));
+    }
+  };
+
+  const toggleChatMessageLike = async (event: React.MouseEvent<HTMLButtonElement>, message: ChatMessage) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const sessionKey = `${message.dayKey}:${message.messageId}`;
+    const alreadyLiked = likedChatSessionKeys.has(sessionKey);
+    if (pendingChatLikeId === message.messageId) {
+      return;
+    }
+
+    setPendingChatLikeId(message.messageId);
+    try {
+      const response = await fetch(apiUrl(`/api/chat/messages/${message.messageId}/like?ts=${Date.now()}`), {
+        method: alreadyLiked ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.error || 'Unable to update chat like right now.');
+        return;
+      }
+
+      const normalized = normalizeChatMessage(data);
+      if (!normalized) {
+        return;
+      }
+
+      setChatMessages((current) => current.map((entry) => (
+        entry.dayKey === normalized.dayKey && entry.messageId === normalized.messageId
+          ? { ...entry, likeCount: normalized.likeCount }
+          : entry
+      )));
+      setLikedChatSessionKeys((current) => {
+        const next = new Set(current);
+        if (alreadyLiked) {
+          next.delete(sessionKey);
+        } else {
+          next.add(sessionKey);
+        }
+        return next;
+      });
+    } catch {
+      setError('Unable to reach backend.');
+    } finally {
+      setPendingChatLikeId((current) => (current === message.messageId ? null : current));
+    }
+  };
+
+  const deleteOwnChatMessage = async (event: React.MouseEvent<HTMLButtonElement>, message: ChatMessage) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!profile || profile.isObserver || pendingChatDeleteId === message.messageId) {
+      return;
+    }
+
+    if (!window.confirm('Delete this message? This cannot be undone.')) {
+      return;
+    }
+
+    setPendingChatDeleteId(message.messageId);
+    try {
+      const response = await fetch(apiUrl(`/api/chat/messages/${message.messageId}?ts=${Date.now()}`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author: profile.username }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.error || 'Unable to delete this message right now.');
+        return;
+      }
+      setChatMessages((current) => current.filter((entry) => entry.messageId !== message.messageId));
+    } catch {
+      setError('Unable to reach backend.');
+    } finally {
+      setPendingChatDeleteId((current) => (current === message.messageId ? null : current));
+    }
+  };
+
+  const handleChatImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const dataUrl = await resizeImageDataUrl(file, {
+        targetWidth: 960,
+        targetHeight: 960,
+        quality: 0.92,
+        padToBounds: false,
+      });
+      setChatImageDraft(dataUrl);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unable to upload image.');
     } finally {
@@ -2315,12 +2940,28 @@ function App() {
         {!betweenBooksActive && (
           <div className="tooltip-row">
             <span className="tooltip-label">{progressLabel(reader.progressMode)}</span>
-            <span>{formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode)}</span>
+            <span>
+              {formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode)}
+              {formatProgressPercent(reader.currentPage, reader.totalPageCount) && (
+                <span className="progress-percent">{formatProgressPercent(reader.currentPage, reader.totalPageCount)}</span>
+              )}
+            </span>
           </div>
         )}
         {!betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (
           <div className="tooltip-rating-only">
             {renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0)}
+          </div>
+        )}
+        {profile && !profile.isObserver && reader.username !== profile.username && !reader.isGhost && (
+          <div className="tooltip-chat-row">
+            <button
+              type="button"
+              className="tooltip-chat-button"
+              onClick={(event) => startChatAbout(event, reader, betweenBooksActive ? '' : reader.currentBook)}
+            >
+              💬 Chat
+            </button>
           </div>
         )}
       </div>
@@ -2716,17 +3357,37 @@ function App() {
                 onClick={(event) => handleAvatarClick(event, profile.username)}
               >
                 <div className="avatar-anchor">
-                  <div className="avatar">
+                  <div className={`avatar ${profile.isGhost ? 'avatar-ghost' : ''}`}>
                     {activeTooltipUsername === profile.username && (
                       renderReaderTooltip(profile, currentTooltipClassName)
                     )}
                     {renderAvatarContent(profile, profile.isObserver ? '👀' : '📚')}
                     {renderReadingTimeBadge(profile)}
-                    <span className="book-format-badge" role="img" aria-label="format">
-                      {formatBadgeEmoji(profile.books?.[profile.currentBookIndex]?.format ?? 'physical')}
-                    </span>
+                    {!profile.isGhost && (
+                      <span className="book-format-badge" role="img" aria-label="format">
+                        {formatBadgeEmoji(profile.books?.[profile.currentBookIndex]?.format ?? 'physical')}
+                      </span>
+                    )}
+                    {chatPings.length > 0 && (
+                      <button
+                        type="button"
+                        className="chat-bell-badge"
+                        title={`Chat request from ${chatPings.map((ping) => ping.fromUsername).join(', ')}`}
+                        aria-label={`Open live chat: request from ${chatPings.map((ping) => ping.fromUsername).join(', ')}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          acknowledgeChatPings();
+                          setIsChatCollapsed(false);
+                          focusChatComposer();
+                        }}
+                      >
+                        <span aria-hidden="true">🔔</span>
+                        {chatPings.length > 1 && <span className="chat-bell-count">{chatPings.length}</span>}
+                      </button>
+                    )}
                   </div>
-                  <div className="avatar-name">{formatReaderBadgeLabel(profile.username, profile.status)}</div>
+                  <div className={`avatar-name ${profile.isGhost ? 'avatar-name-ghost' : ''}`}>{formatReaderBadgeLabel(profile.username, profile.status)}{renderStatusLike(profile, true)}</div>
                 </div>
               </div>
             )}
@@ -2747,17 +3408,19 @@ function App() {
                   onClick={(event) => handleAvatarClick(event, reader.username)}
                 >
                   <div className="avatar-anchor">
-                    <div className={`avatar remote-avatar-badge ${activeTooltipUsername === reader.username ? 'avatar-hovered' : ''}`}>
+                    <div className={`avatar remote-avatar-badge ${activeTooltipUsername === reader.username ? 'avatar-hovered' : ''} ${reader.isGhost ? 'avatar-ghost' : ''}`}>
                       {activeTooltipUsername === reader.username && (
                         renderReaderTooltip(reader, tooltipClassName)
                       )}
                       {renderAvatarContent(reader, '📖')}
                       {renderReadingTimeBadge(reader)}
-                      <span className="book-format-badge" role="img" aria-label="format">
-                        {formatBadgeEmoji(reader.books?.[reader.currentBookIndex]?.format ?? 'physical')}
-                      </span>
+                      {!reader.isGhost && (
+                        <span className="book-format-badge" role="img" aria-label="format">
+                          {formatBadgeEmoji(reader.books?.[reader.currentBookIndex]?.format ?? 'physical')}
+                        </span>
+                      )}
                     </div>
-                    <div className="avatar-name remote-avatar-name">{formatReaderBadgeLabel(reader.username, reader.status)}</div>
+                    <div className={`avatar-name remote-avatar-name ${reader.isGhost ? 'avatar-name-ghost' : ''}`}>{formatReaderBadgeLabel(reader.username, reader.status)}{renderStatusLike(reader, false)}</div>
                   </div>
                 </div>
               );
@@ -2862,18 +3525,58 @@ function App() {
                 <div className="profile-section-card profile-status-section-card">
                   <div className="profile-field">
                     <label htmlFor="statusText">Reading status or mood</label>
-                    <input
-                      id="statusText"
-                      className="status-text-input"
-                      value={statusText}
-                      onChange={(event) => {
-                        const nextStatus = event.target.value;
-                        statusTextRef.current = nextStatus;
-                        setStatusText(nextStatus);
+                    <div
+                      className="recent-status-control"
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                          setIsRecentStatusListOpen(false);
+                        }
                       }}
-                      placeholder="in a coffee break"
-                      maxLength={48}
-                    />
+                    >
+                      <input
+                        id="statusText"
+                        className="status-text-input"
+                        value={statusText}
+                        onFocus={() => setIsRecentStatusListOpen(true)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            setIsRecentStatusListOpen(false);
+                          }
+                        }}
+                        onChange={(event) => {
+                          const nextStatus = event.target.value;
+                          statusTextRef.current = nextStatus;
+                          setStatusText(nextStatus);
+                        }}
+                        placeholder="in a coffee break"
+                        maxLength={48}
+                        autoComplete="off"
+                        aria-haspopup={profile.recentStatuses?.length ? 'listbox' : undefined}
+                        aria-expanded={profile.recentStatuses?.length ? isRecentStatusListOpen : undefined}
+                        aria-controls={profile.recentStatuses?.length ? 'recent-status-options' : undefined}
+                      />
+                      {isRecentStatusListOpen && profile.recentStatuses && profile.recentStatuses.length > 0 && (
+                        <div id="recent-status-options" className="recent-status-menu" role="listbox" aria-label="Recent statuses">
+                          {profile.recentStatuses.map((recentStatus, index) => (
+                            <button
+                              key={`${recentStatus}-${index}`}
+                              type="button"
+                              className="recent-status-option"
+                              role="option"
+                              aria-selected={statusText === recentStatus}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                statusTextRef.current = recentStatus;
+                                setStatusText(recentStatus);
+                                setIsRecentStatusListOpen(false);
+                              }}
+                            >
+                              {recentStatus}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <p className="progress-hint">A short witty one-liner is ideal.</p>
                     <div className="profile-section-action-row">
                       <button
@@ -3044,6 +3747,9 @@ function App() {
                                 }}
                                 placeholder={editingBookMode === 'audio' ? '10h30m' : '400'}
                               />
+                              <span className="progress-percent progress-percent-readonly" title="Completion (read only)" aria-label={`Completion ${editingProgressPercent ?? 'unknown'}`}>
+                                {editingProgressPercent ?? '—'}
+                              </span>
                             </div>
                           </div>
                           <p className="progress-hint">
@@ -3132,11 +3838,231 @@ function App() {
             )}
           </aside>
 
+          {!profile.isObserver && (
+            <section ref={chatBoardRef} className={`bulletin-board chat-board ${isChatCollapsed ? 'bulletin-board-collapsed' : ''}`} aria-label="Live book chat">
+              <div className="bulletin-board-header">
+                <div className="bulletin-board-header-main">
+                  <h3>Live Book Chat</h3>
+                  <p>Talk about books in real time. Cleared every day.</p>
+                </div>
+                <button
+                  type="button"
+                  className="profile-collapse-button"
+                  onClick={() => {
+                    if (isChatCollapsed) {
+                      acknowledgeChatPings();
+                    }
+                    setIsChatCollapsed((current) => !current);
+                  }}
+                  aria-expanded={!isChatCollapsed}
+                  aria-controls="chat-board-body"
+                  aria-label={isChatCollapsed ? 'Expand live chat' : 'Minimize live chat'}
+                  title={isChatCollapsed ? 'Expand live chat' : 'Minimize live chat'}
+                >
+                  {isChatCollapsed ? '▢' : '—'}
+                </button>
+              </div>
+
+              {!isChatCollapsed && (
+                <div id="chat-board-body" className="bulletin-board-body">
+                  <div
+                    ref={chatFeedRef}
+                    className="bulletin-feed chat-feed"
+                    role="log"
+                    aria-live="polite"
+                    onScroll={(event) => {
+                      chatStickToBottomRef.current = event.currentTarget.scrollTop < 40;
+                    }}
+                  >
+                    {chatMessages.length === 0 ? (
+                      <p className="bulletin-empty">No messages yet today. Say hello, or click Chat on a reader&apos;s book in the scene.</p>
+                    ) : (
+                      [...chatMessages].reverse().map((message) => (
+                        <article
+                          key={`${message.dayKey}-${message.messageId}`}
+                          className={`bulletin-post chat-message ${message.author === profile.username ? 'chat-message-own' : ''} ${message.toUsername === profile.username ? 'chat-message-to-me' : ''}`}
+                          role="article"
+                          aria-label={message.toUsername ? `Message from ${message.author} to ${message.toUsername}` : `Message from ${message.author}`}
+                        >
+                          <div className="bulletin-post-meta">
+                            <div className="bulletin-author-wrap">
+                              <span className="bulletin-avatar" aria-hidden="true">
+                                {message.avatarImageData ? (
+                                  <img className="bulletin-avatar-image" src={message.avatarImageData} alt="" />
+                                ) : (
+                                  <span className="bulletin-avatar-emoji">{message.avatarIcon || '📚'}</span>
+                                )}
+                              </span>
+                              <span className="bulletin-author-name">{message.author}</span>
+                              {message.toUsername && (
+                                <>
+                                  <span className="chat-arrow" aria-hidden="true">→</span>
+                                  <span className="bulletin-avatar" aria-hidden="true">
+                                    {message.toAvatarImageData ? (
+                                      <img className="bulletin-avatar-image" src={message.toAvatarImageData} alt="" />
+                                    ) : (
+                                      <span className="bulletin-avatar-emoji">{message.toAvatarIcon || '📚'}</span>
+                                    )}
+                                  </span>
+                                  <span className="bulletin-author-name">{message.toUsername}</span>
+                                </>
+                              )}
+                              <span className="bulletin-post-id">#{message.messageId}</span>
+                            </div>
+                            <span className="bulletin-post-time">{formatRelativeTime(message.createdAt, browserNow)}</span>
+                          </div>
+                          {message.toUsername && message.bookTitle && (
+                            <p className="chat-message-book">about Book &ldquo;{message.bookTitle}&rdquo;</p>
+                          )}
+                          <div className={`bulletin-post-content ${message.imageData ? 'bulletin-post-content-has-image' : ''}`}>
+                            {message.text && <p className="bulletin-post-text">{message.text}</p>}
+                            {message.imageData && (
+                              <button
+                                type="button"
+                                className="bulletin-post-image-button"
+                                onClick={() => setExpandedBulletinImage(message.imageData)}
+                                aria-label={`Open image from ${message.author}`}
+                              >
+                                <img className="bulletin-post-image" src={message.imageData} alt={`Chat image by ${message.author}`} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="bulletin-like-row">
+                            {message.author === profile.username && (
+                              <button
+                                type="button"
+                                className="bulletin-delete-button"
+                                onClick={(event) => deleteOwnChatMessage(event, message)}
+                                disabled={pendingChatDeleteId === message.messageId}
+                                aria-label="Delete this message"
+                                title="Delete this message"
+                              >
+                                {pendingChatDeleteId === message.messageId ? '…' : '🗑️'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={`bulletin-like-button ${likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'bulletin-like-button-done' : ''}`}
+                              onClick={(event) => toggleChatMessageLike(event, message)}
+                              disabled={pendingChatLikeId === message.messageId || pendingChatDeleteId === message.messageId}
+                              aria-label={likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'Unlike this message' : 'Like this message'}
+                            >
+                              {likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? '♥' : '♡'}
+                            </button>
+                            <span className="bulletin-like-count" aria-live="polite">{message.likeCount}</span>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+
+                  <form className="bulletin-composer" onSubmit={submitChatMessage}>
+                    <div className="chat-target">
+                      <label className="chat-target-label" htmlFor="chatRecipient">To</label>
+                      {chatTarget && (
+                        <span className="bulletin-avatar" aria-hidden="true">
+                          {chatTarget.avatarImageData ? (
+                            <img className="bulletin-avatar-image" src={chatTarget.avatarImageData} alt="" />
+                          ) : (
+                            <span className="bulletin-avatar-emoji">{chatTarget.avatarIcon || '📚'}</span>
+                          )}
+                        </span>
+                      )}
+                      <select
+                        id="chatRecipient"
+                        className="chat-target-select"
+                        value={chatTarget?.username ?? ''}
+                        onChange={(event) => handleChatRecipientChange(event.target.value)}
+                      >
+                        <option value="">Everyone</option>
+                        {chatRecipientGroups.wroteToYou.length > 0 && (
+                          <optgroup label="Wrote to you">
+                            {chatRecipientGroups.wroteToYou.map((name) => (
+                              <option key={`wrote-${name}`} value={name}>{chatPresentNames.has(name) ? name : `${name} (not here now)`}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {chatRecipientGroups.active.length > 0 && (
+                          <optgroup label="Active readers">
+                            {chatRecipientGroups.active.map((name) => (
+                              <option key={`active-${name}`} value={name}>{name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {chatRecipientGroups.others.length > 0 && (
+                          <optgroup label="Others in today's chat">
+                            {chatRecipientGroups.others.map((name) => (
+                              <option key={`other-${name}`} value={name}>{name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                      {chatTarget?.bookTitle && (
+                        <span className="chat-target-book">about Book &ldquo;{chatTarget.bookTitle}&rdquo;</span>
+                      )}
+                    </div>
+                    <label htmlFor="chatText">Message</label>
+                    <textarea
+                      id="chatText"
+                      ref={chatTextareaRef}
+                      value={chatDraft}
+                      onChange={(event) => setChatDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          void submitChatMessage();
+                        }
+                      }}
+                      maxLength={800}
+                      rows={3}
+                      placeholder="Chat about a book... (Enter to send, Shift+Enter for a new line)"
+                    />
+                    <div className="bulletin-image-upload-row">
+                      <label className="bulletin-image-upload-button" htmlFor="chatImageUpload">Add image</label>
+                      <input
+                        id="chatImageUpload"
+                        className="bulletin-image-upload-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleChatImageUpload}
+                      />
+                      {chatImageDraft && (
+                        <button
+                          type="button"
+                          className="bulletin-image-remove-button"
+                          onClick={() => setChatImageDraft('')}
+                        >
+                          Remove image
+                        </button>
+                      )}
+                    </div>
+                    {chatImageDraft && (
+                      <button
+                        type="button"
+                        className="bulletin-image-preview-card"
+                        onClick={() => setExpandedBulletinImage(chatImageDraft)}
+                        aria-label="Open selected chat image"
+                      >
+                        <img className="bulletin-image-preview" src={chatImageDraft} alt="Selected chat upload" />
+                      </button>
+                    )}
+                    <div className="bulletin-composer-actions">
+                      <span className="bulletin-char-count">{chatDraft.trim().length}/800</span>
+                      <button type="submit" disabled={isPostingChat || (!chatDraft.trim() && !chatImageDraft)}>
+                        {isPostingChat ? 'Posting…' : 'Post'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </section>
+          )}
+
           <section className={`bulletin-board ${isBulletinCollapsed ? 'bulletin-board-collapsed' : ''}`} aria-label="Daily bulletin board">
             <div className="bulletin-board-header">
               <div className="bulletin-board-header-main">
                 <h3>Daily Bulletin Board</h3>
-                <p>New day, fresh board. Newest posts appear first.</p>
+                <p>Posts stay for two days. Newest posts appear first.</p>
               </div>
               <button
                 type="button"
@@ -3200,8 +4126,9 @@ function App() {
                                 onClick={(event) => deleteOwnBulletinPost(event, post)}
                                 disabled={deletePending}
                                 aria-label="Delete this post"
+                                title="Delete this post"
                               >
-                                {deletePending ? 'Deleting…' : 'Delete'}
+                                {deletePending ? '…' : '🗑️'}
                               </button>
                             )}
                             <button
@@ -3324,6 +4251,31 @@ function App() {
                   <span className="stats-label">Observers</span>
                   <span className="stats-value">{observerCount}</span>
                 </div>
+              </div>
+            )}
+            {!isStatsCollapsed && !profile.isObserver && (
+              <div className="stats-day-streak">
+                <span className="stats-label">Day streak</span>
+                <span className="stats-day-streak-value">
+                  <span aria-hidden="true">🔥</span>
+                  {Math.max(0, Math.floor(Number(profile.dayStreak) || 0))}
+                </span>
+              </div>
+            )}
+            {!isStatsCollapsed && (
+              <div className="stats-top-readers">
+                <span className="stats-label">Daily top readers</span>
+                <ul className="stats-top-readers-list">
+                  {['🥇', '🥈', '🥉'].map((medal, index) => {
+                    const reader = topDailyReaders[index];
+                    return (
+                      <li key={medal} className="stats-top-readers-row">
+                        <span className="stats-top-readers-medal" aria-hidden="true">{medal}</span>
+                        <span className="stats-top-readers-name">{reader?.username ?? ''}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
           </section>
