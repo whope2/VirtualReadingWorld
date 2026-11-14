@@ -254,6 +254,7 @@ export type Profile = {
 export type ProfileBook = {
   title: string;
   author: string;
+  imageData?: string;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -870,6 +871,7 @@ function normalizeBetweenBookEntry(book: ProfileBook): ProfileBook {
     ...book,
     title: BETWEEN_BOOKS_TITLE,
     author: '',
+    imageData: '',
     currentProgress: 0,
     totalProgress: 0,
     currentRating: 0,
@@ -891,6 +893,7 @@ function normalizeBookEntry(value: unknown, fallback: ProfileBook): ProfileBook 
   return {
     title: typeof source.title === 'string' ? source.title : fallback.title,
     author: typeof source.author === 'string' ? source.author : fallback.author,
+    imageData: normalizeBulletinImageData(source.imageData ?? fallback.imageData),
     currentProgress: Number.isFinite(safeCurrent) && safeCurrent >= 0 ? Math.floor(safeCurrent) : 0,
     totalProgress: Number.isFinite(safeTotal) && safeTotal >= 0 ? Math.floor(safeTotal) : 0,
     currentRating: safeRating,
@@ -2431,6 +2434,22 @@ export async function getTopDailyReaders(limit = 3): Promise<DailyTopReader[]> {
     .filter((entry) => entry.minutes > 0)
     .sort((a, b) => b.minutes - a.minutes)
     .slice(0, limit);
+}
+
+export async function listTodayChatReaders(): Promise<Array<{ username: string; avatarIcon: string; avatarImageData: string }>> {
+  const today = toLocalDayKey();
+  const query = `SELECT profiles.username, profiles.avatar_icon, profiles.avatar_image_data
+    FROM profiles JOIN reader_streaks ON reader_streaks.username = profiles.username
+    WHERE reader_streaks.last_login_day_key = ${databaseType === 'postgres' ? '$1' : '?'}
+    ORDER BY profiles.username ASC`;
+  const rows = databaseType === 'postgres'
+    ? (await pool.query(query, [today])).rows
+    : await allSql<{ username: string; avatar_icon: string; avatar_image_data: string }>(query, [today]);
+  return rows.map((row: { username: string; avatar_icon: string; avatar_image_data: string }) => ({
+    username: row.username,
+    avatarIcon: normalizeAvatarIcon(row.avatar_icon),
+    avatarImageData: normalizeAvatarImageData(row.avatar_image_data),
+  }));
 }
 
 function previousDayKey(dayKey: string): string {

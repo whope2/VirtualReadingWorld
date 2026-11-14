@@ -124,6 +124,7 @@ Each `books[i]` item:
 
 - `title`: string
 - `author`: string
+- `imageData`: optional image data URL for the book cover; send an empty string to remove it. Omitting it preserves the existing image.
 - `format`: `physical | ebook | audiobook`
 - `progressMode`: `pages | audio` (derived from format in server logic)
 - `currentProgress`: non-negative integer

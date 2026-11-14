@@ -405,6 +405,7 @@ function normalizeBetweenBooksEntry(book) {
         ...book,
         title: BETWEEN_BOOKS_TITLE,
         author: '',
+        imageData: '',
         currentProgress: 0,
         totalProgress: 0,
         currentRating: 0,
@@ -444,6 +445,7 @@ function normalizeIncomingBooks(profile) {
         const normalizedBook = {
             title: typeof source?.title === 'string' ? source.title : fallback.title,
             author: typeof source?.author === 'string' ? source.author : fallback.author,
+            imageData: typeof source?.imageData === 'string' ? source.imageData : '',
             currentProgress: Number.isFinite(currentProgress) && currentProgress >= 0 ? Math.floor(currentProgress) : 0,
             totalProgress: Number.isFinite(totalProgress) && totalProgress >= 0 ? Math.floor(totalProgress) : 0,
             currentRating,
@@ -460,6 +462,7 @@ function profileToBookDrafts(books) {
     return books.map((book) => ({
         title: book.title,
         author: book.author,
+        imageData: book.imageData || '',
         format: book.format,
         currentRating: normalizeRating(book.currentRating ?? 0),
         currentProgress: formatProgressInput(book.currentProgress, progressModeForFormat(book.format)),
@@ -641,6 +644,7 @@ function App() {
     const [pendingBulletinDeleteKey, setPendingBulletinDeleteKey] = useState(null);
     const [likedBulletinSessionKeys, setLikedBulletinSessionKeys] = useState(new Set());
     const [chatMessages, setChatMessages] = useState([]);
+    const [todayChatReaders, setTodayChatReaders] = useState([]);
     const [chatDraft, setChatDraft] = useState('');
     const [chatTarget, setChatTarget] = useState(null);
     const [pendingChatDeleteId, setPendingChatDeleteId] = useState(null);
@@ -754,6 +758,7 @@ function App() {
             setPinnedReaderUsername(null);
             setHoveredReaderUsername(null);
             setChatMessages([]);
+            setTodayChatReaders([]);
             setChatPings([]);
             setChatDraft('');
             setChatTarget(null);
@@ -763,6 +768,35 @@ function App() {
             chatStickToBottomRef.current = true;
         }
     }, [profile]);
+    useEffect(() => {
+        if (!profile?.username || profile.isObserver) {
+            setTodayChatReaders([]);
+            return;
+        }
+        let active = true;
+        const loadReaders = () => {
+            fetch(apiUrl(`/api/chat/readers?ts=${Date.now()}`), { cache: 'no-store' })
+                .then((response) => {
+                if (!response.ok)
+                    throw new Error('Unable to load readers');
+                return response.json();
+            })
+                .then((data) => {
+                if (!active || !Array.isArray(data))
+                    return;
+                setTodayChatReaders(data.filter((reader) => typeof reader?.username === 'string'
+                    && typeof reader?.avatarIcon === 'string'
+                    && typeof reader?.avatarImageData === 'string'));
+            })
+                .catch(() => undefined);
+        };
+        loadReaders();
+        const interval = window.setInterval(loadReaders, 30000);
+        return () => {
+            active = false;
+            window.clearInterval(interval);
+        };
+    }, [profile?.username, profile?.isObserver]);
     useEffect(() => {
         const feed = chatFeedRef.current;
         if (feed && chatStickToBottomRef.current) {
@@ -1572,6 +1606,7 @@ function App() {
                 normalizedBooks.push({
                     title: draft.title,
                     author: draft.author,
+                    imageData: draft.imageData,
                     currentRating: normalizeRating(draft.currentRating ?? 0),
                     likeCount: normalizeLikeCount(currentProfile.books?.[index]?.likeCount ?? 0),
                     format: draft.format,
@@ -1756,6 +1791,7 @@ function App() {
             return {
                 title: draft.title,
                 author: draft.author,
+                imageData: draft.imageData,
                 currentRating: normalizeRating(draft.currentRating ?? 0),
                 likeCount: normalizeLikeCount(profile.books?.[index]?.likeCount ?? 0),
                 format: draft.format,
@@ -1899,6 +1935,7 @@ function App() {
         }
     }
     const chatPresentNames = new Set(otherReaders.filter((reader) => reader.username !== chatMe && !reader.isGhost).map((reader) => reader.username));
+    const chatGhostNames = new Set(otherReaders.filter((reader) => reader.username !== chatMe && reader.isGhost).map((reader) => reader.username));
     const chatRecipientGroups = (() => {
         const taken = new Set();
         const take = (names) => names
@@ -1912,8 +1949,10 @@ function App() {
         });
         const wroteToYou = take(Array.from(chatWroteToMe));
         const active = take(Array.from(chatPresentNames));
+        const ghosts = take(Array.from(chatGhostNames));
+        const visitedToday = take(todayChatReaders.map((reader) => reader.username));
         const others = take([...Array.from(chatAuthorAvatars.keys()), ...(chatTarget ? [chatTarget.username] : [])]);
-        return { wroteToYou, active, others };
+        return { wroteToYou, active, ghosts, visitedToday, others };
     })();
     const handleChatRecipientChange = (username) => {
         if (!username) {
@@ -1921,9 +1960,10 @@ function App() {
             return;
         }
         const present = otherReaders.find((reader) => reader.username === username);
+        const visited = todayChatReaders.find((reader) => reader.username === username);
         const author = chatAuthorAvatars.get(username);
-        const avatarIcon = present?.avatarIcon || author?.avatarIcon || '📚';
-        const avatarImageData = present?.avatarImageData || author?.avatarImageData || '';
+        const avatarIcon = present?.avatarIcon || visited?.avatarIcon || author?.avatarIcon || '📚';
+        const avatarImageData = present?.avatarImageData || visited?.avatarImageData || author?.avatarImageData || '';
         setChatTarget((current) => ({
             username,
             avatarIcon,
@@ -1935,6 +1975,7 @@ function App() {
     const editingBook = profileForm.books[safeEditingBookIndex] ?? profileForm.books[0] ?? {
         title: '',
         author: '',
+        imageData: '',
         format: 'physical',
         currentRating: 0,
         currentProgress: '0',
@@ -2474,7 +2515,7 @@ function App() {
         const alreadyLiked = likedBookSessionKeys.has(likeSessionKey);
         const isPending = pendingLikeKey === likeSessionKey;
         const likeDisabled = !profile || profile.isObserver || isPending || betweenBooksActive;
-        return (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, onClick: (event) => event.stopPropagation(), onPointerDown: (event) => event.stopPropagation(), children: [!betweenBooksActive && (_jsxs("div", { className: "tooltip-like-inline-row", children: [_jsx("button", { type: "button", className: `tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleBookLikeFromTooltip(event, reader.username, safeBookIndex, currentBookDetails), disabled: likeDisabled, "aria-label": alreadyLiked ? 'Unlike this book' : 'Like this book', children: alreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: likeCount })] })), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Book" }), _jsx("span", { children: betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook })] }), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: reader.currentAuthor })] })), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(reader.progressMode) }), _jsxs("span", { children: [formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode), formatProgressPercent(reader.currentPage, reader.totalPageCount) && (_jsx("span", { className: "progress-percent", children: formatProgressPercent(reader.currentPage, reader.totalPageCount) }))] })] })), !betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (_jsx("div", { className: "tooltip-rating-only", children: renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0) })), profile && !profile.isObserver && reader.username !== profile.username && !reader.isGhost && (_jsx("div", { className: "tooltip-chat-row", children: _jsx("button", { type: "button", className: "tooltip-chat-button", onClick: (event) => startChatAbout(event, reader, betweenBooksActive ? '' : reader.currentBook), children: "\uD83D\uDCAC Chat" }) }))] }));
+        return (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, onClick: (event) => event.stopPropagation(), onPointerDown: (event) => event.stopPropagation(), children: [!betweenBooksActive && (_jsxs("div", { className: "tooltip-like-inline-row", children: [_jsx("button", { type: "button", className: `tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleBookLikeFromTooltip(event, reader.username, safeBookIndex, currentBookDetails), disabled: likeDisabled, "aria-label": alreadyLiked ? 'Unlike this book' : 'Like this book', children: alreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: likeCount })] })), _jsxs("div", { className: "tooltip-book-content", children: [!betweenBooksActive && currentBookDetails?.imageData && (_jsx("img", { className: "tooltip-book-cover", src: currentBookDetails.imageData, alt: `Cover of ${reader.currentBook || 'current book'}` })), _jsxs("div", { className: "tooltip-book-details", children: [_jsx("div", { className: "tooltip-book-title", children: betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook }), !betweenBooksActive && (_jsx("div", { className: "tooltip-book-author", children: reader.currentAuthor }))] })] }), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(reader.progressMode) }), _jsxs("span", { children: [formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode), formatProgressPercent(reader.currentPage, reader.totalPageCount) && (_jsx("span", { className: "progress-percent", children: formatProgressPercent(reader.currentPage, reader.totalPageCount) }))] })] })), !betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (_jsx("div", { className: "tooltip-rating-only", children: renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0) })), profile && !profile.isObserver && reader.username !== profile.username && (_jsx("div", { className: "tooltip-chat-row", children: _jsx("button", { type: "button", className: "tooltip-chat-button", onClick: (event) => startChatAbout(event, reader, betweenBooksActive ? '' : reader.currentBook), children: "\uD83D\uDCAC Chat" }) }))] }));
     };
     const handleAvatarUpload = async (event) => {
         const file = event.target.files?.[0];
@@ -2492,6 +2533,35 @@ function App() {
         }
         finally {
             event.target.value = '';
+        }
+    };
+    const handleBookCoverUpload = async (event, bookIndex) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file)
+            return;
+        if (!file.type.startsWith('image/')) {
+            setError('Please choose an image file for the book cover.');
+            return;
+        }
+        const sessionVersion = sessionVersionRef.current;
+        try {
+            const imageData = await resizeImageDataUrl(file, {
+                targetWidth: 360,
+                targetHeight: 480,
+                outputType: 'image/jpeg',
+                quality: 0.85,
+                padToBounds: false,
+            });
+            if (sessionVersion !== sessionVersionRef.current)
+                return;
+            setProfileForm((current) => ({
+                ...current,
+                books: current.books.map((book, index) => index === bookIndex ? { ...book, imageData } : book),
+            }));
+        }
+        catch (error) {
+            setError(error instanceof Error ? error.message : 'Unable to upload book cover.');
         }
     };
     const avatarPreviewValue = avatarImageData ? (_jsx("img", { className: "avatar-menu-preview-image", src: avatarImageData, alt: "Selected avatar" })) : (_jsx("span", { className: "avatar-menu-preview-emoji", role: "img", "aria-label": "selected avatar emoji", children: avatarIconDraft || '📚' }));
@@ -2827,7 +2897,10 @@ function App() {
                                                                                     books: nextBooks,
                                                                                 };
                                                                             });
-                                                                        } })] }), _jsxs("div", { className: "profile-field progress-field", children: [_jsx("label", { htmlFor: "progressCurrent", children: "Reading progress" }), _jsx("div", { className: "progress-controls", children: _jsxs("div", { className: "progress-input-row", children: [_jsx("input", { id: "progressCurrent", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.currentProgress, onChange: (event) => {
+                                                                        } })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "bookCoverUpload", children: "Book cover" }), _jsxs("div", { className: "book-cover-editor", children: [editingBook.imageData && (_jsx("img", { className: "book-cover-preview", src: editingBook.imageData, alt: `Cover of ${editingBook.title || 'selected book'}` })), _jsxs("div", { className: "book-cover-actions", children: [_jsx("label", { className: "bulletin-image-upload-button", htmlFor: "bookCoverUpload", children: editingBook.imageData ? 'Update image' : 'Add image' }), _jsx("input", { id: "bookCoverUpload", className: "bulletin-image-upload-input", type: "file", accept: "image/*", onChange: (event) => void handleBookCoverUpload(event, safeEditingBookIndex) }), editingBook.imageData && (_jsx("button", { type: "button", className: "bulletin-delete-button book-cover-remove-button", "aria-label": "Remove book cover image", title: "Remove book cover image", onClick: () => setProfileForm((current) => ({
+                                                                                            ...current,
+                                                                                            books: current.books.map((book, index) => index === safeEditingBookIndex ? { ...book, imageData: '' } : book),
+                                                                                        })), children: _jsx("span", { "aria-hidden": "true", children: "\uD83D\uDDD1\uFE0F" }) }))] })] })] }), _jsxs("div", { className: "profile-field progress-field", children: [_jsx("label", { htmlFor: "progressCurrent", children: "Reading progress" }), _jsx("div", { className: "progress-controls", children: _jsxs("div", { className: "progress-input-row", children: [_jsx("input", { id: "progressCurrent", inputMode: editingBookMode === 'audio' ? 'text' : 'numeric', value: editingBook.currentProgress, onChange: (event) => {
                                                                                         const nextValue = event.target.value;
                                                                                         setProfileForm((current) => {
                                                                                             const nextBooks = [...current.books];
@@ -2884,7 +2957,7 @@ function App() {
                                             setIsChatCollapsed((current) => !current);
                                         }, "aria-expanded": !isChatCollapsed, "aria-controls": "chat-board-body", "aria-label": isChatCollapsed ? 'Expand live chat' : 'Minimize live chat', title: isChatCollapsed ? 'Expand live chat' : 'Minimize live chat', children: isChatCollapsed ? '▢' : '—' })] }), !isChatCollapsed && (_jsxs("div", { id: "chat-board-body", className: "bulletin-board-body", children: [_jsx("div", { ref: chatFeedRef, className: "bulletin-feed chat-feed", role: "log", "aria-live": "polite", onScroll: (event) => {
                                             chatStickToBottomRef.current = event.currentTarget.scrollTop < 40;
-                                        }, children: chatMessages.length === 0 ? (_jsx("p", { className: "bulletin-empty", children: "No messages yet today. Say hello, or click Chat on a reader's book in the scene." })) : ([...chatMessages].reverse().map((message) => (_jsxs("article", { className: `bulletin-post chat-message ${message.author === profile.username ? 'chat-message-own' : ''} ${message.toUsername === profile.username ? 'chat-message-to-me' : ''}`, role: "article", "aria-label": message.toUsername ? `Message from ${message.author} to ${message.toUsername}` : `Message from ${message.author}`, children: [_jsxs("div", { className: "bulletin-post-meta", children: [_jsxs("div", { className: "bulletin-author-wrap", children: [_jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: message.avatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: message.avatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: message.avatarIcon || '📚' })) }), _jsx("span", { className: "bulletin-author-name", children: message.author }), message.toUsername && (_jsxs(_Fragment, { children: [_jsx("span", { className: "chat-arrow", "aria-hidden": "true", children: "\u2192" }), _jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: message.toAvatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: message.toAvatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: message.toAvatarIcon || '📚' })) }), _jsx("span", { className: "bulletin-author-name", children: message.toUsername })] })), _jsxs("span", { className: "bulletin-post-id", children: ["#", message.messageId] })] }), _jsx("span", { className: "bulletin-post-time", children: formatRelativeTime(message.createdAt, browserNow) })] }), message.toUsername && message.bookTitle && (_jsxs("p", { className: "chat-message-book", children: ["about Book \u201C", message.bookTitle, "\u201D"] })), _jsxs("div", { className: `bulletin-post-content ${message.imageData ? 'bulletin-post-content-has-image' : ''}`, children: [message.text && _jsx("p", { className: "bulletin-post-text", children: message.text }), message.imageData && (_jsx("button", { type: "button", className: "bulletin-post-image-button", onClick: () => setExpandedBulletinImage(message.imageData), "aria-label": `Open image from ${message.author}`, children: _jsx("img", { className: "bulletin-post-image", src: message.imageData, alt: `Chat image by ${message.author}` }) }))] }), _jsxs("div", { className: "bulletin-like-row", children: [message.author === profile.username && (_jsx("button", { type: "button", className: "bulletin-delete-button", onClick: (event) => deleteOwnChatMessage(event, message), disabled: pendingChatDeleteId === message.messageId, "aria-label": "Delete this message", title: "Delete this message", children: pendingChatDeleteId === message.messageId ? '…' : '🗑️' })), _jsx("button", { type: "button", className: `bulletin-like-button ${likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'bulletin-like-button-done' : ''}`, onClick: (event) => toggleChatMessageLike(event, message), disabled: pendingChatLikeId === message.messageId || pendingChatDeleteId === message.messageId, "aria-label": likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'Unlike this message' : 'Like this message', children: likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? '♥' : '♡' }), _jsx("span", { className: "bulletin-like-count", "aria-live": "polite", children: message.likeCount })] })] }, `${message.dayKey}-${message.messageId}`)))) }), _jsxs("form", { className: "bulletin-composer", onSubmit: submitChatMessage, children: [_jsxs("div", { className: "chat-target", children: [_jsx("label", { className: "chat-target-label", htmlFor: "chatRecipient", children: "To" }), chatTarget && (_jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: chatTarget.avatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: chatTarget.avatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: chatTarget.avatarIcon || '📚' })) })), _jsxs("select", { id: "chatRecipient", className: "chat-target-select", value: chatTarget?.username ?? '', onChange: (event) => handleChatRecipientChange(event.target.value), children: [_jsx("option", { value: "", children: "Everyone" }), chatRecipientGroups.wroteToYou.length > 0 && (_jsx("optgroup", { label: "Wrote to you", children: chatRecipientGroups.wroteToYou.map((name) => (_jsx("option", { value: name, children: chatPresentNames.has(name) ? name : `${name} (not here now)` }, `wrote-${name}`))) })), chatRecipientGroups.active.length > 0 && (_jsx("optgroup", { label: "Active readers", children: chatRecipientGroups.active.map((name) => (_jsx("option", { value: name, children: name }, `active-${name}`))) })), chatRecipientGroups.others.length > 0 && (_jsx("optgroup", { label: "Others in today's chat", children: chatRecipientGroups.others.map((name) => (_jsx("option", { value: name, children: name }, `other-${name}`))) }))] }), chatTarget?.bookTitle && (_jsxs("span", { className: "chat-target-book", children: ["about Book \u201C", chatTarget.bookTitle, "\u201D"] }))] }), _jsx("label", { htmlFor: "chatText", children: "Message" }), _jsx("textarea", { id: "chatText", ref: chatTextareaRef, value: chatDraft, onChange: (event) => setChatDraft(event.target.value), onKeyDown: (event) => {
+                                        }, children: chatMessages.length === 0 ? (_jsx("p", { className: "bulletin-empty", children: "No messages yet today. Say hello, or click Chat on a reader's book in the scene." })) : ([...chatMessages].reverse().map((message) => (_jsxs("article", { className: `bulletin-post chat-message ${message.author === profile.username ? 'chat-message-own' : ''} ${message.toUsername === profile.username ? 'chat-message-to-me' : ''}`, role: "article", "aria-label": message.toUsername ? `Message from ${message.author} to ${message.toUsername}` : `Message from ${message.author}`, children: [_jsxs("div", { className: "bulletin-post-meta", children: [_jsxs("div", { className: "bulletin-author-wrap", children: [_jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: message.avatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: message.avatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: message.avatarIcon || '📚' })) }), _jsx("span", { className: "bulletin-author-name", children: message.author }), message.toUsername && (_jsxs(_Fragment, { children: [_jsx("span", { className: "chat-arrow", "aria-hidden": "true", children: "\u2192" }), _jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: message.toAvatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: message.toAvatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: message.toAvatarIcon || '📚' })) }), _jsx("span", { className: "bulletin-author-name", children: message.toUsername })] })), _jsxs("span", { className: "bulletin-post-id", children: ["#", message.messageId] })] }), _jsx("span", { className: "bulletin-post-time", children: formatRelativeTime(message.createdAt, browserNow) })] }), message.toUsername && message.bookTitle && (_jsxs("p", { className: "chat-message-book", children: ["about Book \u201C", message.bookTitle, "\u201D"] })), _jsxs("div", { className: `bulletin-post-content ${message.imageData ? 'bulletin-post-content-has-image' : ''}`, children: [message.text && _jsx("p", { className: "bulletin-post-text", children: message.text }), message.imageData && (_jsx("button", { type: "button", className: "bulletin-post-image-button", onClick: () => setExpandedBulletinImage(message.imageData), "aria-label": `Open image from ${message.author}`, children: _jsx("img", { className: "bulletin-post-image", src: message.imageData, alt: `Chat image by ${message.author}` }) }))] }), _jsxs("div", { className: "bulletin-like-row", children: [message.author === profile.username && (_jsx("button", { type: "button", className: "bulletin-delete-button", onClick: (event) => deleteOwnChatMessage(event, message), disabled: pendingChatDeleteId === message.messageId, "aria-label": "Delete this message", title: "Delete this message", children: pendingChatDeleteId === message.messageId ? '…' : '🗑️' })), _jsx("button", { type: "button", className: `bulletin-like-button ${likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'bulletin-like-button-done' : ''}`, onClick: (event) => toggleChatMessageLike(event, message), disabled: pendingChatLikeId === message.messageId || pendingChatDeleteId === message.messageId, "aria-label": likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? 'Unlike this message' : 'Like this message', children: likedChatSessionKeys.has(`${message.dayKey}:${message.messageId}`) ? '♥' : '♡' }), _jsx("span", { className: "bulletin-like-count", "aria-live": "polite", children: message.likeCount })] })] }, `${message.dayKey}-${message.messageId}`)))) }), _jsxs("form", { className: "bulletin-composer", onSubmit: submitChatMessage, children: [_jsxs("div", { className: "chat-target", children: [_jsx("label", { className: "chat-target-label", htmlFor: "chatRecipient", children: "To" }), chatTarget && (_jsx("span", { className: "bulletin-avatar", "aria-hidden": "true", children: chatTarget.avatarImageData ? (_jsx("img", { className: "bulletin-avatar-image", src: chatTarget.avatarImageData, alt: "" })) : (_jsx("span", { className: "bulletin-avatar-emoji", children: chatTarget.avatarIcon || '📚' })) })), _jsxs("select", { id: "chatRecipient", className: "chat-target-select", value: chatTarget?.username ?? '', onChange: (event) => handleChatRecipientChange(event.target.value), children: [_jsx("option", { value: "", children: "Everyone" }), chatRecipientGroups.wroteToYou.length > 0 && (_jsx("optgroup", { label: "Wrote to you", children: chatRecipientGroups.wroteToYou.map((name) => (_jsx("option", { value: name, children: chatPresentNames.has(name) ? name : `${name} (not here now)` }, `wrote-${name}`))) })), chatRecipientGroups.active.length > 0 && (_jsx("optgroup", { label: "Active readers", children: chatRecipientGroups.active.map((name) => (_jsx("option", { value: name, children: name }, `active-${name}`))) })), chatRecipientGroups.ghosts.length > 0 && (_jsx("optgroup", { label: "Away readers", children: chatRecipientGroups.ghosts.map((name) => (_jsx("option", { value: name, children: name }, `ghost-${name}`))) })), chatRecipientGroups.visitedToday.length > 0 && (_jsx("optgroup", { label: "Visited today", children: chatRecipientGroups.visitedToday.map((name) => (_jsx("option", { value: name, children: name }, `visited-${name}`))) })), chatRecipientGroups.others.length > 0 && (_jsx("optgroup", { label: "Others in today's chat", children: chatRecipientGroups.others.map((name) => (_jsx("option", { value: name, children: name }, `other-${name}`))) }))] }), chatTarget?.bookTitle && (_jsxs("span", { className: "chat-target-book", children: ["about Book \u201C", chatTarget.bookTitle, "\u201D"] }))] }), _jsx("label", { htmlFor: "chatText", children: "Message" }), _jsx("textarea", { id: "chatText", ref: chatTextareaRef, value: chatDraft, onChange: (event) => setChatDraft(event.target.value), onKeyDown: (event) => {
                                                     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                                                         event.preventDefault();
                                                         void submitChatMessage();

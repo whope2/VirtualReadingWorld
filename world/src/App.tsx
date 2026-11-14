@@ -109,6 +109,7 @@ type BookFormat = 'physical' | 'ebook' | 'audiobook';
 type ProfileBook = {
   title: string;
   author: string;
+  imageData?: string;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -120,6 +121,7 @@ type ProfileBook = {
 type ProfileBookDraft = {
   title: string;
   author: string;
+  imageData: string;
   currentProgress: string;
   totalProgress: string;
   currentRating: number;
@@ -184,6 +186,12 @@ type ChatTarget = {
   avatarIcon: string;
   avatarImageData: string;
   bookTitle: string;
+};
+
+type ChatReader = {
+  username: string;
+  avatarIcon: string;
+  avatarImageData: string;
 };
 
 type ChatPing = {
@@ -606,6 +614,7 @@ function normalizeBetweenBooksEntry(book: ProfileBook): ProfileBook {
     ...book,
     title: BETWEEN_BOOKS_TITLE,
     author: '',
+    imageData: '',
     currentProgress: 0,
     totalProgress: 0,
     currentRating: 0,
@@ -649,6 +658,7 @@ function normalizeIncomingBooks(profile: Partial<Profile>): { books: ProfileBook
     const normalizedBook: ProfileBook = {
       title: typeof source?.title === 'string' ? source.title : fallback.title,
       author: typeof source?.author === 'string' ? source.author : fallback.author,
+      imageData: typeof source?.imageData === 'string' ? source.imageData : '',
       currentProgress: Number.isFinite(currentProgress) && currentProgress >= 0 ? Math.floor(currentProgress) : 0,
       totalProgress: Number.isFinite(totalProgress) && totalProgress >= 0 ? Math.floor(totalProgress) : 0,
       currentRating,
@@ -668,6 +678,7 @@ function profileToBookDrafts(books: ProfileBook[]): ProfileBookDraft[] {
   return books.map((book) => ({
     title: book.title,
     author: book.author,
+    imageData: book.imageData || '',
     format: book.format,
     currentRating: normalizeRating(book.currentRating ?? 0),
     currentProgress: formatProgressInput(book.currentProgress, progressModeForFormat(book.format)),
@@ -867,6 +878,7 @@ function App() {
   const [pendingBulletinDeleteKey, setPendingBulletinDeleteKey] = useState<string | null>(null);
   const [likedBulletinSessionKeys, setLikedBulletinSessionKeys] = useState<Set<string>>(new Set());
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [todayChatReaders, setTodayChatReaders] = useState<ChatReader[]>([]);
   const [chatDraft, setChatDraft] = useState('');
   const [chatTarget, setChatTarget] = useState<ChatTarget | null>(null);
   const [pendingChatDeleteId, setPendingChatDeleteId] = useState<number | null>(null);
@@ -987,6 +999,7 @@ function App() {
       setPinnedReaderUsername(null);
       setHoveredReaderUsername(null);
       setChatMessages([]);
+      setTodayChatReaders([]);
       setChatPings([]);
       setChatDraft('');
       setChatTarget(null);
@@ -996,6 +1009,37 @@ function App() {
       chatStickToBottomRef.current = true;
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!profile?.username || profile.isObserver) {
+      setTodayChatReaders([]);
+      return;
+    }
+
+    let active = true;
+    const loadReaders = () => {
+      fetch(apiUrl(`/api/chat/readers?ts=${Date.now()}`), { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error('Unable to load readers');
+          return response.json();
+        })
+        .then((data: unknown) => {
+          if (!active || !Array.isArray(data)) return;
+          setTodayChatReaders(data.filter((reader): reader is ChatReader =>
+            typeof reader?.username === 'string'
+            && typeof reader?.avatarIcon === 'string'
+            && typeof reader?.avatarImageData === 'string'
+          ));
+        })
+        .catch(() => undefined);
+    };
+    loadReaders();
+    const interval = window.setInterval(loadReaders, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [profile?.username, profile?.isObserver]);
 
   useEffect(() => {
     const feed = chatFeedRef.current;
@@ -1911,6 +1955,7 @@ function App() {
         normalizedBooks.push({
           title: draft.title,
           author: draft.author,
+          imageData: draft.imageData,
           currentRating: normalizeRating(draft.currentRating ?? 0),
           likeCount: normalizeLikeCount(currentProfile.books?.[index]?.likeCount ?? 0),
           format: draft.format,
@@ -2109,6 +2154,7 @@ function App() {
       return {
         title: draft.title,
         author: draft.author,
+        imageData: draft.imageData,
         currentRating: normalizeRating(draft.currentRating ?? 0),
         likeCount: normalizeLikeCount(profile.books?.[index]?.likeCount ?? 0),
         format: draft.format,
@@ -2262,6 +2308,7 @@ function App() {
     }
   }
   const chatPresentNames = new Set(otherReaders.filter((reader) => reader.username !== chatMe && !reader.isGhost).map((reader) => reader.username));
+  const chatGhostNames = new Set(otherReaders.filter((reader) => reader.username !== chatMe && reader.isGhost).map((reader) => reader.username));
   const chatRecipientGroups = (() => {
     const taken = new Set<string>();
     const take = (names: string[]) => names
@@ -2275,8 +2322,10 @@ function App() {
       });
     const wroteToYou = take(Array.from(chatWroteToMe));
     const active = take(Array.from(chatPresentNames));
+    const ghosts = take(Array.from(chatGhostNames));
+    const visitedToday = take(todayChatReaders.map((reader) => reader.username));
     const others = take([...Array.from(chatAuthorAvatars.keys()), ...(chatTarget ? [chatTarget.username] : [])]);
-    return { wroteToYou, active, others };
+    return { wroteToYou, active, ghosts, visitedToday, others };
   })();
   const handleChatRecipientChange = (username: string) => {
     if (!username) {
@@ -2284,9 +2333,10 @@ function App() {
       return;
     }
     const present = otherReaders.find((reader) => reader.username === username);
+    const visited = todayChatReaders.find((reader) => reader.username === username);
     const author = chatAuthorAvatars.get(username);
-    const avatarIcon = present?.avatarIcon || author?.avatarIcon || '📚';
-    const avatarImageData = present?.avatarImageData || author?.avatarImageData || '';
+    const avatarIcon = present?.avatarIcon || visited?.avatarIcon || author?.avatarIcon || '📚';
+    const avatarImageData = present?.avatarImageData || visited?.avatarImageData || author?.avatarImageData || '';
     setChatTarget((current) => ({
       username,
       avatarIcon,
@@ -2298,6 +2348,7 @@ function App() {
   const editingBook = profileForm.books[safeEditingBookIndex] ?? profileForm.books[0] ?? {
     title: '',
     author: '',
+    imageData: '',
     format: 'physical' as BookFormat,
     currentRating: 0,
     currentProgress: '0',
@@ -2927,16 +2978,17 @@ function App() {
             <span className="tooltip-like-count" aria-live="polite">{likeCount}</span>
           </div>
         )}
-        <div className="tooltip-row">
-          <span className="tooltip-label">Book</span>
-          <span>{betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook}</span>
-        </div>
-        {!betweenBooksActive && (
-          <div className="tooltip-row">
-            <span className="tooltip-label">Author</span>
-            <span>{reader.currentAuthor}</span>
+        <div className="tooltip-book-content">
+          {!betweenBooksActive && currentBookDetails?.imageData && (
+            <img className="tooltip-book-cover" src={currentBookDetails.imageData} alt={`Cover of ${reader.currentBook || 'current book'}`} />
+          )}
+          <div className="tooltip-book-details">
+            <div className="tooltip-book-title">{betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook}</div>
+            {!betweenBooksActive && (
+              <div className="tooltip-book-author">{reader.currentAuthor}</div>
+            )}
           </div>
-        )}
+        </div>
         {!betweenBooksActive && (
           <div className="tooltip-row">
             <span className="tooltip-label">{progressLabel(reader.progressMode)}</span>
@@ -2953,7 +3005,7 @@ function App() {
             {renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0)}
           </div>
         )}
-        {profile && !profile.isObserver && reader.username !== profile.username && !reader.isGhost && (
+        {profile && !profile.isObserver && reader.username !== profile.username && (
           <div className="tooltip-chat-row">
             <button
               type="button"
@@ -2983,6 +3035,34 @@ function App() {
       setError(error instanceof Error ? error.message : 'Unable to upload image.');
     } finally {
       event.target.value = '';
+    }
+  };
+
+  const handleBookCoverUpload = async (event: React.ChangeEvent<HTMLInputElement>, bookIndex: number) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file for the book cover.');
+      return;
+    }
+
+    const sessionVersion = sessionVersionRef.current;
+    try {
+      const imageData = await resizeImageDataUrl(file, {
+        targetWidth: 360,
+        targetHeight: 480,
+        outputType: 'image/jpeg',
+        quality: 0.85,
+        padToBounds: false,
+      });
+      if (sessionVersion !== sessionVersionRef.current) return;
+      setProfileForm((current) => ({
+        ...current,
+        books: current.books.map((book, index) => index === bookIndex ? { ...book, imageData } : book),
+      }));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to upload book cover.');
     }
   };
 
@@ -3702,6 +3782,40 @@ function App() {
                             }}
                           />
                         </div>
+                        <div className="profile-field">
+                          <label htmlFor="bookCoverUpload">Book cover</label>
+                          <div className="book-cover-editor">
+                            {editingBook.imageData && (
+                              <img className="book-cover-preview" src={editingBook.imageData} alt={`Cover of ${editingBook.title || 'selected book'}`} />
+                            )}
+                            <div className="book-cover-actions">
+                              <label className="bulletin-image-upload-button" htmlFor="bookCoverUpload">
+                                {editingBook.imageData ? 'Update image' : 'Add image'}
+                              </label>
+                              <input
+                                id="bookCoverUpload"
+                                className="bulletin-image-upload-input"
+                                type="file"
+                                accept="image/*"
+                                onChange={(event) => void handleBookCoverUpload(event, safeEditingBookIndex)}
+                              />
+                              {editingBook.imageData && (
+                                <button
+                                  type="button"
+                                  className="bulletin-delete-button book-cover-remove-button"
+                                  aria-label="Remove book cover image"
+                                  title="Remove book cover image"
+                                  onClick={() => setProfileForm((current) => ({
+                                    ...current,
+                                    books: current.books.map((book, index) => index === safeEditingBookIndex ? { ...book, imageData: '' } : book),
+                                  }))}
+                                >
+                                  <span aria-hidden="true">🗑️</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                         <div className="profile-field progress-field">
                           <label htmlFor="progressCurrent">Reading progress</label>
                           <div className="progress-controls">
@@ -3986,6 +4100,20 @@ function App() {
                           <optgroup label="Active readers">
                             {chatRecipientGroups.active.map((name) => (
                               <option key={`active-${name}`} value={name}>{name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {chatRecipientGroups.ghosts.length > 0 && (
+                          <optgroup label="Away readers">
+                            {chatRecipientGroups.ghosts.map((name) => (
+                              <option key={`ghost-${name}`} value={name}>{name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {chatRecipientGroups.visitedToday.length > 0 && (
+                          <optgroup label="Visited today">
+                            {chatRecipientGroups.visitedToday.map((name) => (
+                              <option key={`visited-${name}`} value={name}>{name}</option>
                             ))}
                           </optgroup>
                         )}

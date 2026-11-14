@@ -6,7 +6,7 @@ import path from 'node:path';
 
 dotenv.config();
 
-const { ensureSchema, getProfile, createProfile, updateProfile, listProfiles, listAllProfiles, getActiveProfileCount, getActiveReaderLimit, setActiveReaderLimit, resetActiveReaders, listDailyBulletinPosts, createDailyBulletinPost, setDailyBulletinPostLike, deleteDailyBulletinPost, deleteDailyBulletinPostByAuthor, resetDailyBulletinBoard, getDailyVisitStats, recordDailyVisit, getTopDailyReaders, recordLoginStreak, enterGhostMode, reactivateFromGhost, listChatMessages, createChatMessage, deleteChatMessageByAuthor, deleteChatMessage, setChatMessageLike, setProfileStatusLike, createChatPing, listChatPings, clearChatPings, maintainChatRetention, dbType } = require('./db') as typeof import('./db');
+const { ensureSchema, getProfile, createProfile, updateProfile, listProfiles, listAllProfiles, getActiveProfileCount, getActiveReaderLimit, setActiveReaderLimit, resetActiveReaders, listDailyBulletinPosts, createDailyBulletinPost, setDailyBulletinPostLike, deleteDailyBulletinPost, deleteDailyBulletinPostByAuthor, resetDailyBulletinBoard, getDailyVisitStats, recordDailyVisit, getTopDailyReaders, recordLoginStreak, enterGhostMode, reactivateFromGhost, listChatMessages, listTodayChatReaders, createChatMessage, deleteChatMessageByAuthor, deleteChatMessage, setChatMessageLike, setProfileStatusLike, createChatPing, listChatPings, clearChatPings, maintainChatRetention, dbType } = require('./db') as typeof import('./db');
 
 export const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -21,6 +21,7 @@ type BookFormat = 'physical' | 'ebook' | 'audiobook';
 type ProfileBookPayload = {
   title: string;
   author: string;
+  imageData?: string;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -297,6 +298,7 @@ app.put('/api/profile/:username', async (req, res) => {
       return {
         title: normalizedTitle,
         author: typeof incomingBook?.author === 'string' ? incomingBook.author : existingBook.author,
+        imageData: typeof incomingBook?.imageData === 'string' ? incomingBook.imageData : ('imageData' in existingBook ? existingBook.imageData : ''),
         currentProgress: Number.isFinite(safeCurrent) && safeCurrent >= 0 ? Math.floor(safeCurrent) : 0,
         totalProgress: Number.isFinite(safeTotal) && safeTotal >= 0 ? Math.floor(safeTotal) : 0,
         currentRating: normalizeRating(rawRating),
@@ -626,6 +628,15 @@ app.post('/api/admin/bulletin/reset', async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error('POST /api/admin/bulletin/reset error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/chat/readers', async (_req, res) => {
+  try {
+    return res.json(await listTodayChatReaders());
+  } catch (error) {
+    console.error('GET /api/chat/readers error', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

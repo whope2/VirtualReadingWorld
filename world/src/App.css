@@ -1238,6 +1238,36 @@ header p {
   width: 100%;
 }
 
+.tooltip-book-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.tooltip-book-cover {
+  display: block;
+  width: 70px;
+  max-width: 30%;
+  max-height: 110px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  border-radius: 4px;
+}
+
+.tooltip-book-details {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.tooltip-book-title,
+.tooltip-book-author {
+  margin-bottom: 5px;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .tooltip-row > span:first-child {
   flex-shrink: 0;
 }
@@ -1946,6 +1976,40 @@ header p {
 
 .profile-status-section-card {
   margin-top: 10px;
+}
+
+.book-cover-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.book-cover-preview {
+  width: 72px;
+  height: 96px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #edf2f7;
+}
+
+.book-cover-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.book-cover-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 0 0 auto;
+  font-size: 1rem;
+  cursor: pointer;
 }
 
 .recent-status-control {

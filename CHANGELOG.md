@@ -2,6 +2,12 @@
 
 This project uses Semantic Versioning. Update `VERSION` and add an entry here before each cloud release.
 
+## 0.1.9 - 2026-11-14
+
+- Added optional book cover images to book slots and the scene profile popup.
+- Enabled chat with ghost readers and readers who visited today, including those who have left.
+- Updated the scene popup layout and book cover controls.
+
 ## 0.1.8 - 2026-11-08
 
 - Daily Bulletin now retains today's and yesterday's posts, purges older posts, and uses globally unique post IDs across days. Likes and deletes work for either retained day.

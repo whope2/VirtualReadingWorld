@@ -21,6 +21,8 @@ process.env.DATABASE_FILE = testDbFile;
 
   const loginTimeUtc = Date.now();
   const avatarImageData = 'data:image/png;base64,' + 'A'.repeat(200000);
+  const firstCover = 'data:image/png;base64,Zmlyc3Q=';
+  const secondCover = 'data:image/jpeg;base64,c2Vjb25k';
   const updated = await db.updateProfile({
     ...profile,
     currentPage: 100,
@@ -29,8 +31,8 @@ process.env.DATABASE_FILE = testDbFile;
     isActive: true,
     avatarImageData,
     books: [
-      { ...profile.books[0], currentRating: 4.5, likeCount: 2 },
-      { ...profile.books[1], currentRating: 3.5, likeCount: 1 },
+      { ...profile.books[0], currentRating: 4.5, likeCount: 2, imageData: firstCover },
+      { ...profile.books[1], currentRating: 3.5, likeCount: 1, imageData: secondCover },
       { ...profile.books[2], currentRating: 2, likeCount: 0 },
       { ...profile.books[3] },
     ],
@@ -47,25 +49,34 @@ process.env.DATABASE_FILE = testDbFile;
   assert.strictEqual(reloaded.books[0].likeCount, 2);
   assert.strictEqual(reloaded.books[1].likeCount, 1);
   assert.strictEqual(reloaded.books[2].likeCount, 0);
+  assert.strictEqual(reloaded.books[0].imageData, firstCover);
+  assert.strictEqual(reloaded.books[1].imageData, secondCover);
+  assert.strictEqual(reloaded.books[2].imageData, '');
   assert.strictEqual(reloaded.books[3].title, 'Between books');
   assert.strictEqual(reloaded.loginTimeUtc, loginTimeUtc);
   assert.strictEqual(reloaded.avatarImageData, avatarImageData);
 
+  await db.recordLoginStreak('tester');
+  await db.recordDailyVisit('observer-only');
+  const todayReaders = await db.listTodayChatReaders();
+  assert.ok(todayReaders.some((reader) => reader.username === 'tester' && reader.avatarImageData === avatarImageData));
+  assert.ok(!todayReaders.some((reader) => reader.username === 'observer-only'));
+
   const firstStats = await db.recordDailyVisit('tester');
-  assert.strictEqual(firstStats.visitCount, 1);
-  assert.strictEqual(firstStats.userCount, 1);
+  assert.strictEqual(firstStats.visitCount, 2);
+  assert.strictEqual(firstStats.userCount, 2);
 
   const secondStats = await db.recordDailyVisit('tester');
-  assert.strictEqual(secondStats.visitCount, 2);
-  assert.strictEqual(secondStats.userCount, 1);
+  assert.strictEqual(secondStats.visitCount, 3);
+  assert.strictEqual(secondStats.userCount, 2);
 
   const thirdStats = await db.recordDailyVisit('reader-two');
-  assert.strictEqual(thirdStats.visitCount, 3);
-  assert.strictEqual(thirdStats.userCount, 2);
+  assert.strictEqual(thirdStats.visitCount, 4);
+  assert.strictEqual(thirdStats.userCount, 3);
 
   const loadedStats = await db.getDailyVisitStats();
-  assert.strictEqual(loadedStats.visitCount, 3);
-  assert.strictEqual(loadedStats.userCount, 2);
+  assert.strictEqual(loadedStats.visitCount, 4);
+  assert.strictEqual(loadedStats.userCount, 3);
   assert.strictEqual(loadedStats.totalReadingMinutes, 0);
 
   const sessionStartUtc = Date.now() - (95 * 60 * 1000);
