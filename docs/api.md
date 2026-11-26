@@ -115,6 +115,8 @@ curl http://localhost:4000/api/profile/Fox
 
 Updates a profile, including whether the reader is active.
 
+Optional `booksRead` and `readingGoal` fields hold the reader's yearly totals as non-negative whole numbers. Send `null` to clear either field; omitted fields retain their existing values. These values are returned with the profile and require no database schema change.
+
 For multi-book support, send:
 
 - `books`: array of up to 3 book slots

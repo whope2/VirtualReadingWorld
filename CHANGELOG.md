@@ -2,6 +2,12 @@
 
 This project uses Semantic Versioning. Update `VERSION` and add an entry here before each cloud release.
 
+## 0.1.14 - 2026-11-26
+
+- Added optional yearly books read and reading goal to About me.
+- Improved About me updates and profile save error feedback.
+- Send chat notifications only after a message is posted.
+
 ## 0.1.13 - 2026-11-26
 
 - Added likes for book feeling notes, with live book and feeling like counts in the scene tooltip.

@@ -536,6 +536,10 @@ header .app-tagline {
   word-break: break-word;
 }
 
+.about-me-popup .about-me-reading-status {
+  margin: 6px 0 0;
+}
+
 .bulletin-board-header {
   display: flex;
   align-items: flex-start;
@@ -2107,6 +2111,23 @@ header .app-tagline {
   margin: 0 0 8px;
   color: #334c76;
   font-size: 0.9rem;
+}
+
+.profile-reading-goal-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.profile-reading-goal-row .profile-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.profile-reading-goal-separator {
+  align-self: center;
+  padding-top: 12px;
 }
 
 .profile-about-me-section-card .about-me-bio-input {

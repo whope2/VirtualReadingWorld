@@ -24,6 +24,17 @@ process.env.DB_TYPE = 'sqlite';
   };
   try {
     const profile = (await request('/profile/feeling-test')).data;
+    const readingStatus = await request('/profile/feeling-test', 'PUT', { booksRead: 0, readingGoal: 24 });
+    assert.equal(readingStatus.data.booksRead, 0);
+    assert.equal(readingStatus.data.readingGoal, 24);
+    const preserved = await request('/profile/feeling-test', 'PUT', { status: 'Reading' });
+    assert.equal(preserved.data.booksRead, 0);
+    assert.equal(preserved.data.readingGoal, 24);
+    assert.equal((await request('/profile/feeling-test', 'PUT', { booksRead: -1 })).status, 400);
+    assert.equal((await request('/profile/feeling-test', 'PUT', { readingGoal: 1.5 })).status, 400);
+    const cleared = await request('/profile/feeling-test', 'PUT', { booksRead: null });
+    assert.equal(cleared.data.booksRead, null);
+    assert.equal(cleared.data.readingGoal, 24);
     const books = profile.books.map((book, index) => index === 0
       ? { ...book, title: 'Test book', feeling: 'A lovely read.' }
       : book);

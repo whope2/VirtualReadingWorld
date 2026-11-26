@@ -239,6 +239,8 @@ export type Profile = {
   books: ProfileBook[];
   aboutMeBio: string;
   aboutMeLink: string;
+  booksRead?: number | null;
+  readingGoal?: number | null;
   favoriteAuthors: string[];
   status: string;
   recentStatuses: string[];
@@ -912,7 +914,11 @@ function parseBooksData(value: unknown, singleBookFallback: ProfileBook): Profil
   return books;
 }
 
-function parseAboutMeData(value: unknown): { aboutMeBio: string; aboutMeLink: string } {
+function normalizeReadingCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function parseAboutMeData(value: unknown): { aboutMeBio: string; aboutMeLink: string; booksRead: number | null; readingGoal: number | null } {
   let parsed = value;
   if (typeof value === 'string' && value.trim()) {
     try {
@@ -922,20 +928,24 @@ function parseAboutMeData(value: unknown): { aboutMeBio: string; aboutMeLink: st
     }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { aboutMeBio: '', aboutMeLink: '' };
+    return { aboutMeBio: '', aboutMeLink: '', booksRead: null, readingGoal: null };
   }
   const source = parsed as Record<string, unknown>;
   return {
     aboutMeBio: typeof source.aboutMeBio === 'string' ? source.aboutMeBio.slice(0, 280) : '',
     aboutMeLink: typeof source.aboutMeLink === 'string' ? source.aboutMeLink.slice(0, 500) : '',
+    booksRead: normalizeReadingCount(source.booksRead),
+    readingGoal: normalizeReadingCount(source.readingGoal),
   };
 }
 
-function serializeBooksData(books: ProfileBook[], aboutMeBio = '', aboutMeLink = ''): string {
+function serializeBooksData(books: ProfileBook[], aboutMeBio = '', aboutMeLink = '', booksRead?: number | null, readingGoal?: number | null): string {
   return JSON.stringify({
     books,
     aboutMeBio: typeof aboutMeBio === 'string' ? aboutMeBio.trim().slice(0, 280) : '',
     aboutMeLink: typeof aboutMeLink === 'string' ? aboutMeLink.trim().slice(0, 500) : '',
+    booksRead: normalizeReadingCount(booksRead),
+    readingGoal: normalizeReadingCount(readingGoal),
   });
 }
 
@@ -1735,7 +1745,7 @@ export async function updateProfile(profile: Profile, enforceActiveLimit = false
              recent_statuses_json = $19
          WHERE username = $1
            RETURNING username, current_book, current_author, current_page, total_page_count, progress_mode, books_data, current_book_index, favorite_authors, status, recent_statuses_json, position_x, position_y, avatar_icon, avatar_image_data, background_scene, is_active, login_time_utc, is_ghost, status_like_count`,
-          [profile.username, safeSelectedBook.title, safeSelectedBook.author, safeSelectedBook.currentProgress, safeSelectedBook.totalProgress, safeSelectedBook.progressMode, serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink), safeCurrentBookIndex, serializeFavoriteAuthors(profile.favoriteAuthors), safeStatus, toStoredPosition(profile.positionX), toStoredPosition(profile.positionY), profile.avatarIcon, safeAvatarImageData, profile.backgroundScene, profile.isActive, persistedLoginTimeUtc, now, JSON.stringify(nextRecentStatuses)]
+          [profile.username, safeSelectedBook.title, safeSelectedBook.author, safeSelectedBook.currentProgress, safeSelectedBook.totalProgress, safeSelectedBook.progressMode, serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink, profile.booksRead, profile.readingGoal), safeCurrentBookIndex, serializeFavoriteAuthors(profile.favoriteAuthors), safeStatus, toStoredPosition(profile.positionX), toStoredPosition(profile.positionY), profile.avatarIcon, safeAvatarImageData, profile.backgroundScene, profile.isActive, persistedLoginTimeUtc, now, JSON.stringify(nextRecentStatuses)]
       );
 
       await client.query('COMMIT');
@@ -1843,7 +1853,7 @@ INSERT INTO profiles(username, current_book, current_author, current_page, total
       safeSelectedBook.currentProgress,
       safeSelectedBook.totalProgress,
       safeSelectedBook.progressMode,
-      serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink),
+      serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink, profile.booksRead, profile.readingGoal),
       safeCurrentBookIndex,
       serializeFavoriteAuthors(profile.favoriteAuthors),
       safeStatus,

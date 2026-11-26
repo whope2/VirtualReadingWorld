@@ -614,6 +614,8 @@ function App() {
         backgroundScene: 'ocean-beach',
         aboutMeBio: '',
         aboutMeLink: '',
+        booksRead: '',
+        readingGoal: '',
     });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -735,6 +737,8 @@ function App() {
                             backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
                             aboutMeBio: '',
                             aboutMeLink: '',
+                            booksRead: '',
+                            readingGoal: '',
                         });
                         setStatusText(observerProfile.status || 'Reading');
                         setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -970,8 +974,6 @@ function App() {
                 editingBookIndex: currentBookIndex,
                 favoriteAuthors: profile.favoriteAuthors.join(', '),
                 backgroundScene: current.backgroundScene || profile.backgroundScene || 'ocean-beach',
-                aboutMeBio: profile.aboutMeBio || '',
-                aboutMeLink: profile.aboutMeLink || '',
             }));
             setStatusText(profile.status || 'Reading');
             setScenePreview(profile.backgroundScene || 'ocean-beach');
@@ -981,6 +983,17 @@ function App() {
             setAvatarPosition(nextPosition);
         }
     }, [profile]);
+    useEffect(() => {
+        if (!profile)
+            return;
+        setProfileForm((current) => ({
+            ...current,
+            aboutMeBio: profile.aboutMeBio || '',
+            aboutMeLink: profile.aboutMeLink || '',
+            booksRead: profile.booksRead == null ? '' : String(profile.booksRead),
+            readingGoal: profile.readingGoal == null ? '' : String(profile.readingGoal),
+        }));
+    }, [profile?.username]);
     useEffect(() => {
         if (!profile || profile.isObserver) {
             return;
@@ -1696,6 +1709,8 @@ function App() {
         if (shouldSendAboutMe) {
             payload.aboutMeBio = (overrides.aboutMeBio ?? currentProfileForm.aboutMeBio).trim().slice(0, 280);
             payload.aboutMeLink = (overrides.aboutMeLink ?? currentProfileForm.aboutMeLink).trim().slice(0, 500);
+            payload.booksRead = overrides.booksRead !== undefined ? overrides.booksRead : currentProfileForm.booksRead === '' ? null : Number(currentProfileForm.booksRead);
+            payload.readingGoal = overrides.readingGoal !== undefined ? overrides.readingGoal : currentProfileForm.readingGoal === '' ? null : Number(currentProfileForm.readingGoal);
         }
         if (overrides.positionX !== undefined) {
             payload.positionX = overrides.positionX;
@@ -1775,6 +1790,8 @@ function App() {
                     backgroundScene: savedScene,
                     aboutMeBio: data?.aboutMeBio || '',
                     aboutMeLink: data?.aboutMeLink || '',
+                    booksRead: data?.booksRead == null ? '' : String(data.booksRead),
+                    readingGoal: data?.readingGoal == null ? '' : String(data.readingGoal),
                 }));
                 setScenePreview(savedScene);
             }
@@ -1783,6 +1800,8 @@ function App() {
                     ...current,
                     aboutMeBio: data?.aboutMeBio || '',
                     aboutMeLink: data?.aboutMeLink || '',
+                    booksRead: data?.booksRead == null ? '' : String(data.booksRead),
+                    readingGoal: data?.readingGoal == null ? '' : String(data.readingGoal),
                 }));
             }
             else if (shouldSendBooks) {
@@ -1826,6 +1845,8 @@ function App() {
         await persistProfile({
             aboutMeBio: profileForm.aboutMeBio,
             aboutMeLink: profileForm.aboutMeLink,
+            booksRead: profileForm.booksRead === '' ? null : Number(profileForm.booksRead),
+            readingGoal: profileForm.readingGoal === '' ? null : Number(profileForm.readingGoal),
         }, 'aboutMe');
     };
     const saveBookInformation = async () => {
@@ -1910,6 +1931,8 @@ function App() {
                 status: nextStatus,
                 aboutMeBio: profileForm.aboutMeBio.trim().slice(0, 280),
                 aboutMeLink: profileForm.aboutMeLink.trim().slice(0, 500),
+                booksRead: profileForm.booksRead === '' ? null : Number(profileForm.booksRead),
+                readingGoal: profileForm.readingGoal === '' ? null : Number(profileForm.readingGoal),
                 backgroundScene: profileForm.backgroundScene || leavingProfile.backgroundScene || 'ocean-beach',
                 avatarIcon: leavingProfile.avatarIcon,
             }),
@@ -1953,6 +1976,8 @@ function App() {
                     backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
                     aboutMeBio: '',
                     aboutMeLink: '',
+                    booksRead: '',
+                    readingGoal: '',
                 });
                 setStatusText(observerProfile.status || 'Reading');
                 setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -2309,11 +2334,6 @@ function App() {
         if (isSceneImmersive || isSceneNativeFullscreen) {
             void exitSceneFullscreen();
         }
-        void fetch(apiUrl(`/api/chat/pings?ts=${Date.now()}`), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: profile.username, to: reader.username, bookTitle: title }),
-        }).catch(() => undefined);
         focusChatComposer();
     };
     const submitChatMessage = async (event) => {
@@ -2657,7 +2677,8 @@ function App() {
         const feelingLikeKey = buildFeelingLikeSessionKey(reader.username, safeBookIndex, currentBookDetails);
         const feelingAlreadyLiked = likedFeelingSessionKeys.has(feelingLikeKey);
         const aboutMeLink = safeExternalUrl(reader.aboutMeLink);
-        const hasAboutMe = Boolean(reader.aboutMeBio?.trim() || aboutMeLink);
+        const hasReadingStatus = reader.booksRead != null || reader.readingGoal != null;
+        const hasAboutMe = Boolean(reader.aboutMeBio?.trim() || aboutMeLink || hasReadingStatus);
         const betweenBooksActive = !hasDisplayedBook || safeBookIndex === BETWEEN_BOOKS_INDEX
             || (typeof currentBookDetails?.title === 'string' && currentBookDetails.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase());
         const likeCount = normalizeLikeCount(matchingPolledBook?.likeCount ?? currentBookDetails?.likeCount ?? 0);
@@ -2665,7 +2686,7 @@ function App() {
         const alreadyLiked = likedBookSessionKeys.has(likeSessionKey);
         const isPending = pendingLikeKey === likeSessionKey;
         const likeDisabled = !profile || profile.isObserver || isPending || betweenBooksActive;
-        return (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, onClick: (event) => event.stopPropagation(), onPointerDown: (event) => event.stopPropagation(), children: [!betweenBooksActive && (_jsxs("div", { className: "tooltip-like-inline-row", children: [availableBookIndices.length > 1 && (_jsxs("div", { className: "tooltip-book-navigation", "aria-label": "Book navigation", children: [_jsx("button", { type: "button", className: "tooltip-book-nav-button", "aria-label": "Previous book", title: "Previous book", onClick: () => changeBook(-1), children: "\u2039" }), _jsxs("span", { "aria-live": "polite", children: [availableBookIndices.indexOf(safeBookIndex) + 1, " / ", availableBookIndices.length] }), _jsx("button", { type: "button", className: "tooltip-book-nav-button", "aria-label": "Next book", title: "Next book", onClick: () => changeBook(1), children: "\u203A" })] })), _jsx("button", { type: "button", className: `tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleBookLikeFromTooltip(event, reader.username, safeBookIndex, currentBookDetails), disabled: likeDisabled, "aria-label": alreadyLiked ? 'Unlike this book' : 'Like this book', children: alreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: likeCount })] })), currentBookDetails?.imageData && !betweenBooksActive ? (_jsxs("div", { className: "tooltip-book-content", children: [_jsx("img", { className: "tooltip-book-cover", src: currentBookDetails.imageData, alt: `Cover of ${currentBookDetails.title}` }), _jsxs("div", { className: "tooltip-book-details", children: [_jsx("div", { className: "tooltip-book-title", children: currentBookDetails.title }), _jsx("div", { className: "tooltip-book-author", children: currentBookDetails.author })] })] })) : betweenBooksActive ? null : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Title" }), _jsx("span", { children: currentBookDetails?.title })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: currentBookDetails?.author })] })] })), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(currentBookDetails?.progressMode ?? 'pages') }), _jsxs("span", { children: [formatProgressDisplay(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0, currentBookDetails?.progressMode ?? 'pages'), formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0) && (_jsx("span", { className: "progress-percent", children: formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0) }))] })] })), !betweenBooksActive && currentBookDetails?.feeling?.trim() && (_jsxs("div", { className: "tooltip-book-feeling", children: [_jsx("span", { className: "tooltip-book-feeling-text", children: currentBookDetails.feeling }), _jsxs("span", { className: "tooltip-feeling-like", children: [_jsx("button", { type: "button", className: `tooltip-like-button ${feelingAlreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleFeelingLike(event, reader, safeBookIndex, currentBookDetails), disabled: !profile || profile.isObserver || pendingFeelingLikeKey !== null, "aria-label": feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling', "aria-pressed": feelingAlreadyLiked, title: feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling', children: feelingAlreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: normalizeLikeCount(matchingPolledBook?.feeling === currentBookDetails.feeling ? matchingPolledBook.feelingLikeCount : currentBookDetails.feelingLikeCount) })] })] })), !betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (_jsx("div", { className: "tooltip-rating-only", children: renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0) })), profile && (hasAboutMe || (reader.username !== profile.username && !profile.isObserver)) && (_jsxs("div", { className: "tooltip-actions", children: [_jsxs("div", { className: "tooltip-chat-row", children: [hasAboutMe && (_jsx("button", { type: "button", className: "tooltip-chat-button", "aria-expanded": aboutMePopupUsername === reader.username, onClick: () => setAboutMePopupUsername((current) => current === reader.username ? null : reader.username), children: "About me" })), !profile.isObserver && reader.username !== profile.username && (_jsx("button", { type: "button", className: "tooltip-chat-button", onClick: (event) => startChatAbout(event, reader, betweenBooksActive ? '' : currentBookDetails?.title ?? ''), children: "\uD83D\uDCAC Chat" }))] }), hasAboutMe && aboutMePopupUsername === reader.username && (_jsxs("div", { className: "about-me-popup", role: "dialog", "aria-label": `${reader.username}'s About me`, children: [_jsxs("div", { className: "about-me-popup-header", children: [_jsxs("strong", { children: ["About ", reader.username] }), _jsx("button", { type: "button", className: "about-me-popup-close", "aria-label": "Close About me", onClick: () => setAboutMePopupUsername(null), children: "\u00D7" })] }), reader.aboutMeBio?.trim() ? _jsx("p", { children: reader.aboutMeBio }) : _jsx("p", { className: "about-me-empty", children: "No bio added." }), aboutMeLink && _jsx("a", { href: aboutMeLink, target: "_blank", rel: "noopener noreferrer", children: aboutMeLink })] }))] }))] }));
+        return (_jsxs("div", { className: `avatar-tooltip ${tooltipClassName}`, onClick: (event) => event.stopPropagation(), onPointerDown: (event) => event.stopPropagation(), children: [!betweenBooksActive && (_jsxs("div", { className: "tooltip-like-inline-row", children: [availableBookIndices.length > 1 && (_jsxs("div", { className: "tooltip-book-navigation", "aria-label": "Book navigation", children: [_jsx("button", { type: "button", className: "tooltip-book-nav-button", "aria-label": "Previous book", title: "Previous book", onClick: () => changeBook(-1), children: "\u2039" }), _jsxs("span", { "aria-live": "polite", children: [availableBookIndices.indexOf(safeBookIndex) + 1, " / ", availableBookIndices.length] }), _jsx("button", { type: "button", className: "tooltip-book-nav-button", "aria-label": "Next book", title: "Next book", onClick: () => changeBook(1), children: "\u203A" })] })), _jsx("button", { type: "button", className: `tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleBookLikeFromTooltip(event, reader.username, safeBookIndex, currentBookDetails), disabled: likeDisabled, "aria-label": alreadyLiked ? 'Unlike this book' : 'Like this book', children: alreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: likeCount })] })), currentBookDetails?.imageData && !betweenBooksActive ? (_jsxs("div", { className: "tooltip-book-content", children: [_jsx("img", { className: "tooltip-book-cover", src: currentBookDetails.imageData, alt: `Cover of ${currentBookDetails.title}` }), _jsxs("div", { className: "tooltip-book-details", children: [_jsx("div", { className: "tooltip-book-title", children: currentBookDetails.title }), _jsx("div", { className: "tooltip-book-author", children: currentBookDetails.author })] })] })) : betweenBooksActive ? null : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Title" }), _jsx("span", { children: currentBookDetails?.title })] }), _jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: "Author" }), _jsx("span", { children: currentBookDetails?.author })] })] })), !betweenBooksActive && (_jsxs("div", { className: "tooltip-row", children: [_jsx("span", { className: "tooltip-label", children: progressLabel(currentBookDetails?.progressMode ?? 'pages') }), _jsxs("span", { children: [formatProgressDisplay(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0, currentBookDetails?.progressMode ?? 'pages'), formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0) && (_jsx("span", { className: "progress-percent", children: formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0) }))] })] })), !betweenBooksActive && currentBookDetails?.feeling?.trim() && (_jsxs("div", { className: "tooltip-book-feeling", children: [_jsx("span", { className: "tooltip-book-feeling-text", children: currentBookDetails.feeling }), _jsxs("span", { className: "tooltip-feeling-like", children: [_jsx("button", { type: "button", className: `tooltip-like-button ${feelingAlreadyLiked ? 'tooltip-like-button-done' : ''}`, onClick: (event) => toggleFeelingLike(event, reader, safeBookIndex, currentBookDetails), disabled: !profile || profile.isObserver || pendingFeelingLikeKey !== null, "aria-label": feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling', "aria-pressed": feelingAlreadyLiked, title: feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling', children: feelingAlreadyLiked ? '♥' : '♡' }), _jsx("span", { className: "tooltip-like-count", "aria-live": "polite", children: normalizeLikeCount(matchingPolledBook?.feeling === currentBookDetails.feeling ? matchingPolledBook.feelingLikeCount : currentBookDetails.feelingLikeCount) })] })] })), !betweenBooksActive && reader.books?.[safeBookIndex]?.currentRating !== undefined && (_jsx("div", { className: "tooltip-rating-only", children: renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0) })), profile && (hasAboutMe || (reader.username !== profile.username && !profile.isObserver)) && (_jsxs("div", { className: "tooltip-actions", children: [_jsxs("div", { className: "tooltip-chat-row", children: [hasAboutMe && (_jsx("button", { type: "button", className: "tooltip-chat-button", "aria-expanded": aboutMePopupUsername === reader.username, onClick: () => setAboutMePopupUsername((current) => current === reader.username ? null : reader.username), children: "About me" })), !profile.isObserver && reader.username !== profile.username && (_jsx("button", { type: "button", className: "tooltip-chat-button", onClick: (event) => startChatAbout(event, reader, betweenBooksActive ? '' : currentBookDetails?.title ?? ''), children: "\uD83D\uDCAC Chat" }))] }), hasAboutMe && aboutMePopupUsername === reader.username && (_jsxs("div", { className: "about-me-popup", role: "dialog", "aria-label": `${reader.username}'s About me`, children: [_jsxs("div", { className: "about-me-popup-header", children: [_jsxs("strong", { children: ["About ", reader.username] }), _jsx("button", { type: "button", className: "about-me-popup-close", "aria-label": "Close About me", onClick: () => setAboutMePopupUsername(null), children: "\u00D7" })] }), reader.aboutMeBio?.trim() ? _jsx("p", { children: reader.aboutMeBio }) : _jsx("p", { className: "about-me-empty", children: "No bio added." }), aboutMeLink && _jsx("a", { href: aboutMeLink, target: "_blank", rel: "noopener noreferrer", children: aboutMeLink }), hasReadingStatus && _jsxs("p", { className: "about-me-reading-status", children: [reader.booksRead ?? '-', " / ", reader.readingGoal ?? '-', " books read"] })] }))] }))] }));
     };
     const handleAvatarUpload = async (event) => {
         const file = event.target.files?.[0];
@@ -2972,7 +2993,7 @@ function App() {
                                                                             }, children: icon }, icon))) }), _jsxs("label", { className: "avatar-picker-upload", children: [_jsx("input", { type: "file", accept: "image/*", onChange: handleAvatarUpload }), "Upload custom image"] })] }))] })] }))] }), _jsx("div", { className: "profile-card-controls", children: _jsx("button", { type: "button", className: "profile-collapse-button", onClick: () => {
                                                 setAvatarMenuOpen(false);
                                                 setIsProfileCollapsed((current) => !current);
-                                            }, "aria-expanded": !isProfileCollapsed, "aria-controls": "profile-editor-body", "aria-label": isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', title: isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', children: isProfileCollapsed ? '▢' : '—' }) })] }), !isProfileCollapsed && profile.isObserver ? (_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Observer mode" }), _jsx("p", { children: "You are viewing the beach without a stored profile." })] })) : null, !isProfileCollapsed && !profile.isObserver ? (_jsxs("form", { id: "profile-editor-body", onSubmit: saveProfile, children: [_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Reading scene" }), _jsx("div", { className: "scene-option-buttons", role: "group", "aria-label": "Reading scene options", children: SCENE_OPTIONS.map((option) => (_jsxs("button", { type: "button", className: `scene-option-button ${(profileForm.backgroundScene || profile?.backgroundScene || 'ocean-beach') === option.value ? 'scene-option-button-active' : ''}`, onClick: () => {
+                                            }, "aria-expanded": !isProfileCollapsed, "aria-controls": "profile-editor-body", "aria-label": isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', title: isProfileCollapsed ? 'Expand profile editor' : 'Minimize profile editor', children: isProfileCollapsed ? '▢' : '—' }) })] }), !isProfileCollapsed && profile.isObserver ? (_jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Observer mode" }), _jsx("p", { children: "You are viewing the beach without a stored profile." })] })) : null, !isProfileCollapsed && !profile.isObserver ? (_jsxs("form", { id: "profile-editor-body", onSubmit: saveProfile, children: [error && _jsx("div", { className: "error", role: "alert", children: error }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { children: "Reading scene" }), _jsx("div", { className: "scene-option-buttons", role: "group", "aria-label": "Reading scene options", children: SCENE_OPTIONS.map((option) => (_jsxs("button", { type: "button", className: `scene-option-button ${(profileForm.backgroundScene || profile?.backgroundScene || 'ocean-beach') === option.value ? 'scene-option-button-active' : ''}`, onClick: () => {
                                                         setProfileForm((current) => ({
                                                             ...current,
                                                             backgroundScene: option.value,
@@ -2996,13 +3017,19 @@ function App() {
                                                                     setIsRecentStatusListOpen(false);
                                                                 }, children: recentStatus }, `${recentStatus}-${index}`))) }))] }), _jsx("p", { className: "progress-hint", children: "A short witty one-liner is ideal." }), _jsx("div", { className: "profile-section-action-row", children: _jsx("button", { type: "button", className: "secondary profile-partial-save-button", onClick: () => {
                                                             void saveStatusAndMood();
-                                                        }, disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }) }), _jsxs("div", { className: "profile-section-card profile-about-me-section-card", children: [_jsx("h3", { children: "About me" }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "aboutMeBio", children: "Short bio" }), _jsx("textarea", { id: "aboutMeBio", value: profileForm.aboutMeBio, maxLength: 280, rows: 3, placeholder: "A little about you as a reader", onChange: (event) => setProfileForm((current) => ({
-                                                            ...current,
-                                                            aboutMeBio: event.target.value.slice(0, 280),
-                                                        })) })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "aboutMeLink", children: "Link" }), _jsx("input", { id: "aboutMeLink", type: "url", value: profileForm.aboutMeLink, maxLength: 500, placeholder: "https://example.com", onChange: (event) => setProfileForm((current) => ({
-                                                            ...current,
-                                                            aboutMeLink: event.target.value.slice(0, 500),
-                                                        })) })] }), _jsx("div", { className: "profile-section-action-row", children: _jsx("button", { type: "button", className: "secondary profile-partial-save-button", onClick: () => void saveAboutMe(), disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }), _jsxs("div", { className: "profile-field profile-field-divider", children: [_jsx("div", { className: "simple-divider", "aria-hidden": "true" }), _jsx("label", { children: "Editing current book" }), _jsxs("div", { className: "book-slot-tabs", role: "tablist", "aria-label": "Book slots", children: [BOOK_SLOT_OPTIONS.map((slot) => (_jsx("button", { type: "button", role: "tab", "aria-selected": safeEditingBookIndex === slot.index, className: `book-slot-tab ${safeEditingBookIndex === slot.index ? 'book-slot-tab-active' : ''}`, onClick: () => {
+                                                        }, disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }) }), _jsxs("div", { className: "profile-section-card profile-about-me-section-card", children: [_jsx("h3", { children: "About me" }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "aboutMeBio", children: "Short bio" }), _jsx("textarea", { id: "aboutMeBio", value: profileForm.aboutMeBio, maxLength: 280, rows: 3, placeholder: "A little about you as a reader", onChange: (event) => {
+                                                            const value = event.target.value.slice(0, 280);
+                                                            setProfileForm((current) => ({ ...current, aboutMeBio: value }));
+                                                        } })] }), _jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "aboutMeLink", children: "Link" }), _jsx("input", { id: "aboutMeLink", type: "url", value: profileForm.aboutMeLink, maxLength: 500, placeholder: "https://example.com", onChange: (event) => {
+                                                            const value = event.target.value.slice(0, 500);
+                                                            setProfileForm((current) => ({ ...current, aboutMeLink: value }));
+                                                        } })] }), _jsxs("div", { className: "profile-reading-goal-row", children: [_jsxs("div", { className: "profile-field", children: [_jsx("label", { htmlFor: "booksRead", children: "Books Read" }), _jsx("input", { id: "booksRead", type: "number", min: "0", max: "999999999999999", step: "1", inputMode: "numeric", value: profileForm.booksRead, onChange: (event) => {
+                                                                    const value = event.target.value.replace(/[^0-9]/g, '').slice(0, 15);
+                                                                    setProfileForm((current) => ({ ...current, booksRead: value }));
+                                                                } })] }), _jsx("span", { className: "profile-reading-goal-separator", "aria-hidden": "true", children: "/" }), _jsxs("div", { className: "profile-field", children: [_jsxs("label", { htmlFor: "readingGoal", children: [new Date(browserNow).getFullYear(), " Reading Goal"] }), _jsx("input", { id: "readingGoal", type: "number", min: "0", max: "999999999999999", step: "1", inputMode: "numeric", value: profileForm.readingGoal, onChange: (event) => {
+                                                                    const value = event.target.value.replace(/[^0-9]/g, '').slice(0, 15);
+                                                                    setProfileForm((current) => ({ ...current, readingGoal: value }));
+                                                                } })] })] }), _jsx("div", { className: "profile-section-action-row", children: _jsx("button", { type: "button", className: "secondary profile-partial-save-button", onClick: () => void saveAboutMe(), disabled: loading, children: loading ? 'Updating…' : 'Update' }) })] }), _jsxs("div", { className: "profile-field profile-field-divider", children: [_jsx("div", { className: "simple-divider", "aria-hidden": "true" }), _jsx("label", { children: "Editing current book" }), _jsxs("div", { className: "book-slot-tabs", role: "tablist", "aria-label": "Book slots", children: [BOOK_SLOT_OPTIONS.map((slot) => (_jsx("button", { type: "button", role: "tab", "aria-selected": safeEditingBookIndex === slot.index, className: `book-slot-tab ${safeEditingBookIndex === slot.index ? 'book-slot-tab-active' : ''}`, onClick: () => {
                                                             setProfileForm((current) => ({
                                                                 ...current,
                                                                 editingBookIndex: slot.index,

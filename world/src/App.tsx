@@ -12,6 +12,8 @@ type Profile = {
   books: ProfileBook[];
   aboutMeBio?: string;
   aboutMeLink?: string;
+  booksRead?: number | null;
+  readingGoal?: number | null;
   favoriteAuthors: string[];
   status: string;
   positionX: number;
@@ -852,6 +854,8 @@ function App() {
     backgroundScene: 'ocean-beach',
     aboutMeBio: '',
     aboutMeLink: '',
+    booksRead: '',
+    readingGoal: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -978,6 +982,8 @@ function App() {
               backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
               aboutMeBio: '',
               aboutMeLink: '',
+              booksRead: '',
+              readingGoal: '',
             });
             setStatusText(observerProfile.status || 'Reading');
             setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -1238,8 +1244,6 @@ function App() {
         editingBookIndex: currentBookIndex,
         favoriteAuthors: profile.favoriteAuthors.join(', '),
         backgroundScene: current.backgroundScene || profile.backgroundScene || 'ocean-beach',
-        aboutMeBio: profile.aboutMeBio || '',
-        aboutMeLink: profile.aboutMeLink || '',
       }));
       setStatusText(profile.status || 'Reading');
       setScenePreview(profile.backgroundScene || 'ocean-beach');
@@ -1249,6 +1253,17 @@ function App() {
       setAvatarPosition(nextPosition);
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!profile) return;
+    setProfileForm((current) => ({
+      ...current,
+      aboutMeBio: profile.aboutMeBio || '',
+      aboutMeLink: profile.aboutMeLink || '',
+      booksRead: profile.booksRead == null ? '' : String(profile.booksRead),
+      readingGoal: profile.readingGoal == null ? '' : String(profile.readingGoal),
+    }));
+  }, [profile?.username]);
 
   useEffect(() => {
     if (!profile || profile.isObserver) {
@@ -2055,6 +2070,8 @@ function App() {
     if (shouldSendAboutMe) {
       payload.aboutMeBio = (overrides.aboutMeBio ?? currentProfileForm.aboutMeBio).trim().slice(0, 280);
       payload.aboutMeLink = (overrides.aboutMeLink ?? currentProfileForm.aboutMeLink).trim().slice(0, 500);
+      payload.booksRead = overrides.booksRead !== undefined ? overrides.booksRead : currentProfileForm.booksRead === '' ? null : Number(currentProfileForm.booksRead);
+      payload.readingGoal = overrides.readingGoal !== undefined ? overrides.readingGoal : currentProfileForm.readingGoal === '' ? null : Number(currentProfileForm.readingGoal);
     }
 
     if (overrides.positionX !== undefined) {
@@ -2142,6 +2159,8 @@ function App() {
           backgroundScene: savedScene,
           aboutMeBio: data?.aboutMeBio || '',
           aboutMeLink: data?.aboutMeLink || '',
+          booksRead: data?.booksRead == null ? '' : String(data.booksRead),
+          readingGoal: data?.readingGoal == null ? '' : String(data.readingGoal),
         }));
         setScenePreview(savedScene);
       } else if (shouldSendAboutMe) {
@@ -2149,6 +2168,8 @@ function App() {
           ...current,
           aboutMeBio: data?.aboutMeBio || '',
           aboutMeLink: data?.aboutMeLink || '',
+          booksRead: data?.booksRead == null ? '' : String(data.booksRead),
+          readingGoal: data?.readingGoal == null ? '' : String(data.readingGoal),
         }));
       } else if (shouldSendBooks) {
         setProfileForm((current) => ({
@@ -2192,6 +2213,8 @@ function App() {
     await persistProfile({
       aboutMeBio: profileForm.aboutMeBio,
       aboutMeLink: profileForm.aboutMeLink,
+      booksRead: profileForm.booksRead === '' ? null : Number(profileForm.booksRead),
+      readingGoal: profileForm.readingGoal === '' ? null : Number(profileForm.readingGoal),
     }, 'aboutMe');
   };
 
@@ -2280,6 +2303,8 @@ function App() {
         status: nextStatus,
         aboutMeBio: profileForm.aboutMeBio.trim().slice(0, 280),
         aboutMeLink: profileForm.aboutMeLink.trim().slice(0, 500),
+        booksRead: profileForm.booksRead === '' ? null : Number(profileForm.booksRead),
+        readingGoal: profileForm.readingGoal === '' ? null : Number(profileForm.readingGoal),
         backgroundScene: profileForm.backgroundScene || leavingProfile.backgroundScene || 'ocean-beach',
         avatarIcon: leavingProfile.avatarIcon,
       }),
@@ -2326,6 +2351,8 @@ function App() {
           backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
           aboutMeBio: '',
           aboutMeLink: '',
+          booksRead: '',
+          readingGoal: '',
         });
         setStatusText(observerProfile.status || 'Reading');
         setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -2729,12 +2756,6 @@ function App() {
       void exitSceneFullscreen();
     }
 
-    void fetch(apiUrl(`/api/chat/pings?ts=${Date.now()}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: profile.username, to: reader.username, bookTitle: title }),
-    }).catch(() => undefined);
-
     focusChatComposer();
   };
 
@@ -3099,7 +3120,8 @@ function App() {
     const feelingLikeKey = buildFeelingLikeSessionKey(reader.username, safeBookIndex, currentBookDetails);
     const feelingAlreadyLiked = likedFeelingSessionKeys.has(feelingLikeKey);
     const aboutMeLink = safeExternalUrl(reader.aboutMeLink);
-    const hasAboutMe = Boolean(reader.aboutMeBio?.trim() || aboutMeLink);
+    const hasReadingStatus = reader.booksRead != null || reader.readingGoal != null;
+    const hasAboutMe = Boolean(reader.aboutMeBio?.trim() || aboutMeLink || hasReadingStatus);
     const betweenBooksActive = !hasDisplayedBook || safeBookIndex === BETWEEN_BOOKS_INDEX
       || (typeof currentBookDetails?.title === 'string' && currentBookDetails.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase());
     const likeCount = normalizeLikeCount(matchingPolledBook?.likeCount ?? currentBookDetails?.likeCount ?? 0);
@@ -3228,6 +3250,7 @@ function App() {
                 </div>
                 {reader.aboutMeBio?.trim() ? <p>{reader.aboutMeBio}</p> : <p className="about-me-empty">No bio added.</p>}
                 {aboutMeLink && <a href={aboutMeLink} target="_blank" rel="noopener noreferrer">{aboutMeLink}</a>}
+                {hasReadingStatus && <p className="about-me-reading-status">{reader.booksRead ?? '-'} / {reader.readingGoal ?? '-'} books read</p>}
               </div>
             )}
           </div>
@@ -3797,6 +3820,7 @@ function App() {
             ) : null}
             {!isProfileCollapsed && !profile.isObserver ? (
               <form id="profile-editor-body" onSubmit={saveProfile}>
+                {error && <div className="error" role="alert">{error}</div>}
                 <div className="profile-field">
                   <label>Reading scene</label>
                   <div className="scene-option-buttons" role="group" aria-label="Reading scene options">
@@ -3902,10 +3926,10 @@ function App() {
                       maxLength={280}
                       rows={3}
                       placeholder="A little about you as a reader"
-                      onChange={(event) => setProfileForm((current) => ({
-                        ...current,
-                        aboutMeBio: event.target.value.slice(0, 280),
-                      }))}
+                      onChange={(event) => {
+                        const value = event.target.value.slice(0, 280);
+                        setProfileForm((current) => ({ ...current, aboutMeBio: value }));
+                      }}
                     />
                   </div>
                   <div className="profile-field">
@@ -3916,11 +3940,28 @@ function App() {
                       value={profileForm.aboutMeLink}
                       maxLength={500}
                       placeholder="https://example.com"
-                      onChange={(event) => setProfileForm((current) => ({
-                        ...current,
-                        aboutMeLink: event.target.value.slice(0, 500),
-                      }))}
+                      onChange={(event) => {
+                        const value = event.target.value.slice(0, 500);
+                        setProfileForm((current) => ({ ...current, aboutMeLink: value }));
+                      }}
                     />
+                  </div>
+                  <div className="profile-reading-goal-row">
+                    <div className="profile-field">
+                      <label htmlFor="booksRead">Books Read</label>
+                      <input id="booksRead" type="number" min="0" max="999999999999999" step="1" inputMode="numeric" value={profileForm.booksRead} onChange={(event) => {
+                        const value = event.target.value.replace(/[^0-9]/g, '').slice(0, 15);
+                        setProfileForm((current) => ({ ...current, booksRead: value }));
+                      }} />
+                    </div>
+                    <span className="profile-reading-goal-separator" aria-hidden="true">/</span>
+                    <div className="profile-field">
+                      <label htmlFor="readingGoal">{new Date(browserNow).getFullYear()} Reading Goal</label>
+                      <input id="readingGoal" type="number" min="0" max="999999999999999" step="1" inputMode="numeric" value={profileForm.readingGoal} onChange={(event) => {
+                        const value = event.target.value.replace(/[^0-9]/g, '').slice(0, 15);
+                        setProfileForm((current) => ({ ...current, readingGoal: value }));
+                      }} />
+                    </div>
                   </div>
                   <div className="profile-section-action-row">
                     <button

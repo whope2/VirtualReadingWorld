@@ -32,6 +32,8 @@ process.env.DATABASE_FILE = testDbFile;
     avatarImageData,
     aboutMeBio: 'Reader, gardener, and collector of quiet mornings.',
     aboutMeLink: 'https://example.com/reader',
+    booksRead: 0,
+    readingGoal: 42,
     books: [
       { ...profile.books[0], currentRating: 4.5, likeCount: 2, imageData: firstCover, feeling: 'Quietly absorbing so far.', feelingLikeCount: 3 },
       { ...profile.books[1], currentRating: 3.5, likeCount: 1, imageData: secondCover },
@@ -63,6 +65,8 @@ process.env.DATABASE_FILE = testDbFile;
   assert.strictEqual(reloaded.avatarImageData, avatarImageData);
   assert.strictEqual(reloaded.aboutMeBio, 'Reader, gardener, and collector of quiet mornings.');
   assert.strictEqual(reloaded.aboutMeLink, 'https://example.com/reader');
+  assert.strictEqual(reloaded.booksRead, 0);
+  assert.strictEqual(reloaded.readingGoal, 42);
 
   const betweenBooks = await db.updateProfile({
     ...reloaded,

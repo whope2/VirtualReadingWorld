@@ -244,7 +244,13 @@ app.put('/api/profile/:username', async (req, res) => {
     return res.status(400).json({ error: 'username is required' });
   }
 
-  const { books, currentBookIndex, currentBook, currentAuthor, currentPage, totalPageCount, progressMode, favoriteAuthors, status, aboutMeBio, aboutMeLink, positionX, positionY, avatarIcon, avatarImageData, backgroundScene, isActive, loginTimeUtc } = req.body ?? {};
+  const { books, currentBookIndex, currentBook, currentAuthor, currentPage, totalPageCount, progressMode, favoriteAuthors, status, aboutMeBio, aboutMeLink, booksRead, readingGoal, positionX, positionY, avatarIcon, avatarImageData, backgroundScene, isActive, loginTimeUtc } = req.body ?? {};
+
+  for (const value of [booksRead, readingGoal]) {
+    if (value !== undefined && value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) {
+      return res.status(400).json({ error: 'Reading counts must be non-negative whole numbers or null.' });
+    }
+  }
 
   try {
     let profile = await getProfile(username);
@@ -354,6 +360,8 @@ app.put('/api/profile/:username', async (req, res) => {
       status: parsedStatus,
       aboutMeBio: typeof aboutMeBio === 'string' ? aboutMeBio.trim().slice(0, 280) : profile.aboutMeBio,
       aboutMeLink: aboutMeLink !== undefined ? normalizeAboutMeLink(aboutMeLink) : profile.aboutMeLink,
+      booksRead: booksRead !== undefined ? booksRead : profile.booksRead,
+      readingGoal: readingGoal !== undefined ? readingGoal : profile.readingGoal,
       positionX: Number.isNaN(parsedPositionX) ? profile.positionX : parsedPositionX,
       positionY: Number.isNaN(parsedPositionY) ? profile.positionY : parsedPositionY,
       avatarIcon: parsedAvatarIcon,
