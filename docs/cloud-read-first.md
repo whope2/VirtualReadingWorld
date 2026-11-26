@@ -17,6 +17,7 @@ Recent journal:
 - Keep SQLite as default in cloud and local.
 - Default upgrade policy: preserve existing cloud SQLite data for all non-schema releases.
 - Schema-change policy: only recreate DB schema/data when explicitly planned for a breaking schema reset.
+- After a verified deployment, retain two versioned release archives: the running release and the previously running release for rollback. Remove only older `virtual-reading-world-v<version>.tar.gz` files from `/home/whope2/`; never remove database backups or application data as part of archive cleanup.
 - The nginx app route must support both URLs by redirecting:
    - `/virtualreadingworld` -> `/virtualreadingworld/`
 
@@ -50,7 +51,7 @@ Use this decision rule before every deployment:
    - `cd ..`
    - `tar --exclude='backend/node_modules' --exclude='world/node_modules' --exclude='backend/data' --exclude='backend/.env' -czf virtual-reading-world-vm-build.tar.gz backend world docs ops README.md`
 3. Upload artifact to VM.
-4. Update backend code and frontend build files.
+4. Before extraction, record the currently running version from `/home/whope2/VirtualReadingWorld/VERSION` and confirm its versioned archive exists. If it is missing, preserve the available archives and resolve the rollback plan before cleanup. Update backend code and frontend build files.
 5. Reinstall backend dependencies on VM:
    - `cd /home/whope2/VirtualReadingWorld/backend && npm install --omit=dev`
 6. Restart backend service:
@@ -60,6 +61,8 @@ Use this decision rule before every deployment:
    - `curl -s http://127.0.0.1:4000/health`
    - `curl -I https://readingisalifestyle.com/virtualreadingworld/`
    - `curl -s https://readingisalifestyle.com/api/active-reader-limit`
+8. Once all checks succeed, inspect `/home/whope2/` and remove only older versioned release tarballs, keeping the verified running release and the release recorded before extraction. If verification fails, keep rollback archives. Check available disk space before uploading and after cleanup; if there is insufficient space for deployment, pause and agree on a recovery plan.
+9. Ask for confirmation before committing and pushing changes to GitHub.
 
 ## Schema-change reset procedure (destructive, opt-in only)
 

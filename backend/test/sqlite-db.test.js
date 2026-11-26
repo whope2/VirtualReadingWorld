@@ -30,11 +30,13 @@ process.env.DATABASE_FILE = testDbFile;
     loginTimeUtc,
     isActive: true,
     avatarImageData,
+    aboutMeBio: 'Reader, gardener, and collector of quiet mornings.',
+    aboutMeLink: 'https://example.com/reader',
     books: [
-      { ...profile.books[0], currentRating: 4.5, likeCount: 2, imageData: firstCover },
+      { ...profile.books[0], currentRating: 4.5, likeCount: 2, imageData: firstCover, feeling: 'Quietly absorbing so far.', feelingLikeCount: 3 },
       { ...profile.books[1], currentRating: 3.5, likeCount: 1, imageData: secondCover },
       { ...profile.books[2], currentRating: 2, likeCount: 0 },
-      { ...profile.books[3] },
+      { ...profile.books[3], title: 'Book Four', author: 'Fourth Author', currentProgress: 12, totalProgress: 240 },
     ],
     currentBookIndex: 0,
   });
@@ -50,11 +52,47 @@ process.env.DATABASE_FILE = testDbFile;
   assert.strictEqual(reloaded.books[1].likeCount, 1);
   assert.strictEqual(reloaded.books[2].likeCount, 0);
   assert.strictEqual(reloaded.books[0].imageData, firstCover);
+  assert.strictEqual(reloaded.books[0].feeling, 'Quietly absorbing so far.');
+  assert.strictEqual(reloaded.books[0].feelingLikeCount, 3);
+  assert.strictEqual(reloaded.books[1].feelingLikeCount, 0);
   assert.strictEqual(reloaded.books[1].imageData, secondCover);
   assert.strictEqual(reloaded.books[2].imageData, '');
-  assert.strictEqual(reloaded.books[3].title, 'Between books');
+  assert.strictEqual(reloaded.books[3].title, 'Book Four');
+  assert.strictEqual(reloaded.currentBookIndex, 0);
   assert.strictEqual(reloaded.loginTimeUtc, loginTimeUtc);
   assert.strictEqual(reloaded.avatarImageData, avatarImageData);
+  assert.strictEqual(reloaded.aboutMeBio, 'Reader, gardener, and collector of quiet mornings.');
+  assert.strictEqual(reloaded.aboutMeLink, 'https://example.com/reader');
+
+  const betweenBooks = await db.updateProfile({
+    ...reloaded,
+    currentBook: 'Between books',
+    currentAuthor: '',
+    currentPage: 0,
+    totalPageCount: 0,
+    currentBookIndex: 4,
+  });
+  assert.strictEqual(betweenBooks.currentBook, 'Between books');
+  assert.strictEqual(betweenBooks.currentBookIndex, 4);
+  assert.strictEqual(betweenBooks.books.length, 4);
+  assert.strictEqual(betweenBooks.books[3].title, 'Book Four');
+
+  const legacyBetweenBooks = await db.updateProfile({
+    ...reloaded,
+    currentBook: 'Between books',
+    currentAuthor: '',
+    currentPage: 0,
+    totalPageCount: 0,
+    currentBookIndex: 3,
+    books: [
+      ...reloaded.books.slice(0, 3),
+      { ...reloaded.books[3], title: 'Between books', author: '', currentProgress: 0, totalProgress: 0 },
+    ],
+  });
+  assert.strictEqual(legacyBetweenBooks.currentBook, 'Between books');
+  assert.strictEqual(legacyBetweenBooks.currentBookIndex, 4);
+  assert.strictEqual(legacyBetweenBooks.books.length, 4);
+  assert.strictEqual(legacyBetweenBooks.books[3].title, '');
 
   await db.recordLoginStreak('tester');
   await db.recordDailyVisit('observer-only');

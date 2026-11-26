@@ -156,6 +156,16 @@ curl -X POST http://localhost:4000/api/profile/Fox/status-like \
 
 `applied` is `false` (and the count is unchanged) when the sent status no longer matches the reader's current one. Returns `404` for an unknown profile and `400` if `status` is missing.
 
+### POST / DELETE /api/profile/:username/books/:bookIndex/feeling-like
+
+Adds or removes a like for a book's feeling note. Send the current `title` and `feeling` in the JSON body; the endpoint returns `409` if either no longer matches. The response includes the updated `feelingLikeCount` and profile. The count resets when the feeling or book title changes and never goes below zero.
+
+```bash
+curl -X POST http://localhost:4000/api/profile/Fox/books/0/feeling-like \
+  -H "Content-Type: application/json" \
+  -d '{"title":"King Sorrow","feeling":"A lovely read."}'
+```
+
 ### GET /api/profiles
 
 Returns the currently active reader profiles.

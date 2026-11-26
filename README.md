@@ -68,7 +68,7 @@ That should return a JSON profile response instead of an error.
 
 This is the standard non-schema release procedure. It preserves the live SQLite database and does not change Nginx or the Hugo site. Read `docs/cloud-read-first.md` before deploying.
 
-Each cloud release has one version in `VERSION`, using Semantic Versioning (`MAJOR.MINOR.PATCH`). Before releasing, increment `VERSION` and add a dated summary to `CHANGELOG.md`. The current release is `0.1.1`.
+Each cloud release has one version in `VERSION`, using Semantic Versioning (`MAJOR.MINOR.PATCH`). Before releasing, increment `VERSION` and add a dated summary to `CHANGELOG.md`. The current release is `0.1.11`.
 
 From this project directory, build and package the release. Do not include `backend/data` or `node_modules`: the VM owns the production reader data and must install its Linux-native dependencies itself.
 
@@ -86,6 +86,8 @@ Upload the archive to the production VM:
 ```bash
 gcloud compute scp "virtual-reading-world-v${RELEASE_VERSION}.tar.gz" whope2@instance-2:/home/whope2/ --project=first-project-297916 --zone=us-east4-a
 ```
+
+Before extracting the new release, record the version currently running on the VM and confirm its archive is present in `/home/whope2/`. This is the rollback archive to retain alongside the new release. If it is missing, keep the available archives and resolve the rollback plan before cleanup.
 
 Deploy it on the VM, reinstall the backend's production dependencies, and restart the existing service:
 
@@ -108,5 +110,9 @@ The service status should be `active`, the health check should return JSON with 
 curl -I https://readingisalifestyle.com/virtualreadingworld/
 curl -s https://readingisalifestyle.com/api/active-reader-limit
 ```
+
+After the deployment and public checks succeed, retain only the archive for the verified running release and the archive for the previously running release. Inspect the filenames in `/home/whope2/` and remove only older `virtual-reading-world-v<version>.tar.gz` release archives; do not remove database backups, application data, or other files. Do not remove any rollback archive if deployment verification fails. Check free disk space before uploading and after cleanup; if there is not enough room to deploy safely, pause and agree on a recovery plan.
+
+After deploying, ask for confirmation before committing and pushing changes to GitHub.
 
 Do not run a database reset unless the release intentionally includes a schema migration. The schema-reset procedure and rollback guidance are in `docs/cloud-read-first.md` and `docs/cloud-deploy-runbook.md`.

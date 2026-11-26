@@ -2,11 +2,33 @@
 
 This project uses Semantic Versioning. Update `VERSION` and add an entry here before each cloud release.
 
+## 0.1.13 - 2026-11-26
+
+- Added likes for book feeling notes, with live book and feeling like counts in the scene tooltip.
+- Added tooltip navigation through titled book slots and refined tooltip labels and styling.
+- Updated the main page tagline typography.
+
+## 0.1.12 - 2026-11-20
+
+- Let readers open their own About me popup from the scene tooltip.
+- Removed quotation marks around the book feeling note.
+
+## 0.1.11 - 2026-11-20
+
+- Replaced the Between books slot with a fourth active book and a separate pause control.
+- Added a per-book feeling one-liner to the scene tooltip.
+- Added reader About me bios and links, with a tooltip popup for non-empty profiles.
+
 ## 0.1.9 - 2026-11-14
 
 - Added optional book cover images to book slots and the scene profile popup.
 - Enabled chat with ghost readers and readers who visited today, including those who have left.
 - Updated the scene popup layout and book cover controls.
+
+## 0.1.10 - 2026-11-15
+
+- Refined the scene popup: progress remains visible with book covers, text-only book details use labeled right-aligned rows, and “Between books” appears without a redundant label.
+- Improved book-cover controls by placing the wider Add/Update image button beside its label and the trash icon below/right of the preview.
 
 ## 0.1.8 - 2026-11-08
 

@@ -22,6 +22,8 @@ type ProfileBookPayload = {
   title: string;
   author: string;
   imageData?: string;
+  feeling?: string;
+  feelingLikeCount?: number;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -31,8 +33,23 @@ type ProfileBookPayload = {
 };
 
 const PROFILE_BOOK_SLOT_COUNT = 4;
-const BETWEEN_BOOKS_INDEX = 3;
+const BETWEEN_BOOKS_INDEX = 4;
 const BETWEEN_BOOKS_TITLE = 'Between books';
+
+function betweenBooksEntry(): ProfileBookPayload {
+  return {
+    title: BETWEEN_BOOKS_TITLE,
+    author: '',
+    imageData: '',
+    feeling: '',
+    currentProgress: 0,
+    totalProgress: 0,
+    currentRating: 0,
+    likeCount: 0,
+    format: 'physical',
+    progressMode: 'pages',
+  };
+}
 
 function normalizeRating(value: unknown): number {
   const parsed = Number(value);
@@ -49,6 +66,18 @@ function normalizeLikeCount(value: unknown): number {
     return 0;
   }
   return Math.floor(parsed);
+}
+
+function normalizeAboutMeLink(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href.slice(0, 500) : '';
+  } catch {
+    return '';
+  }
 }
 
 function normalizeBookFormat(value: unknown): BookFormat {
@@ -215,7 +244,7 @@ app.put('/api/profile/:username', async (req, res) => {
     return res.status(400).json({ error: 'username is required' });
   }
 
-  const { books, currentBookIndex, currentBook, currentAuthor, currentPage, totalPageCount, progressMode, favoriteAuthors, status, positionX, positionY, avatarIcon, avatarImageData, backgroundScene, isActive, loginTimeUtc } = req.body ?? {};
+  const { books, currentBookIndex, currentBook, currentAuthor, currentPage, totalPageCount, progressMode, favoriteAuthors, status, aboutMeBio, aboutMeLink, positionX, positionY, avatarIcon, avatarImageData, backgroundScene, isActive, loginTimeUtc } = req.body ?? {};
 
   try {
     let profile = await getProfile(username);
@@ -260,8 +289,10 @@ app.put('/api/profile/:username', async (req, res) => {
     const normalizedBooks: ProfileBookPayload[] = Array.from({ length: PROFILE_BOOK_SLOT_COUNT }, (_unused, index) => {
       const incomingBook = Array.isArray(books) ? books[index] : undefined;
       const existingBook = profile.books?.[index] ?? {
-        title: index === BETWEEN_BOOKS_INDEX ? BETWEEN_BOOKS_TITLE : (index === 0 ? profile.currentBook : ''),
-        author: index === BETWEEN_BOOKS_INDEX ? '' : (index === 0 ? profile.currentAuthor : ''),
+        title: index === 0 ? profile.currentBook : '',
+        author: index === 0 ? profile.currentAuthor : '',
+        imageData: '',
+        feeling: '',
         currentProgress: index === 0 ? profile.currentPage : 0,
         totalProgress: index === 0 ? profile.totalPageCount : 0,
         likeCount: 0,
@@ -281,24 +312,16 @@ app.put('/api/profile/:username', async (req, res) => {
       const normalizedTitle = typeof incomingBook?.title === 'string' ? incomingBook.title : existingBook.title;
       const existingTitle = typeof existingBook.title === 'string' ? existingBook.title : '';
       const titleChanged = normalizedTitle.trim() !== existingTitle.trim();
-
-      if (index === BETWEEN_BOOKS_INDEX) {
-        return {
-          title: BETWEEN_BOOKS_TITLE,
-          author: '',
-          currentProgress: 0,
-          totalProgress: 0,
-          currentRating: 0,
-          likeCount: 0,
-          format: 'physical',
-          progressMode: 'pages',
-        };
-      }
+      const feeling = typeof incomingBook?.feeling === 'string'
+        ? incomingBook.feeling.replace(/[\r\n]+/g, ' ').slice(0, 160)
+        : typeof existingBook.feeling === 'string' ? existingBook.feeling.slice(0, 160) : '';
 
       return {
         title: normalizedTitle,
         author: typeof incomingBook?.author === 'string' ? incomingBook.author : existingBook.author,
         imageData: typeof incomingBook?.imageData === 'string' ? incomingBook.imageData : ('imageData' in existingBook ? existingBook.imageData : ''),
+        feeling,
+        feelingLikeCount: titleChanged || feeling !== (existingBook.feeling || '') ? 0 : normalizeLikeCount(existingBook.feelingLikeCount),
         currentProgress: Number.isFinite(safeCurrent) && safeCurrent >= 0 ? Math.floor(safeCurrent) : 0,
         totalProgress: Number.isFinite(safeTotal) && safeTotal >= 0 ? Math.floor(safeTotal) : 0,
         currentRating: normalizeRating(rawRating),
@@ -308,7 +331,9 @@ app.put('/api/profile/:username', async (req, res) => {
       };
     });
 
-    const selectedBook = normalizedBooks[parsedCurrentBookIndex] ?? normalizedBooks[0];
+    const selectedBook = parsedCurrentBookIndex === BETWEEN_BOOKS_INDEX
+      ? betweenBooksEntry()
+      : normalizedBooks[parsedCurrentBookIndex] ?? normalizedBooks[0];
     const parsedIsActive = typeof isActive === 'boolean' ? isActive : profile.isActive;
     const parsedStatus = typeof status === 'string' && status.trim() ? status : profile.status || 'Reading';
     const parsedLoginTimeUtc = loginTimeUtc !== undefined ? Number(loginTimeUtc) : profile.loginTimeUtc ?? 0;
@@ -327,6 +352,8 @@ app.put('/api/profile/:username', async (req, res) => {
       books: normalizedBooks,
       favoriteAuthors: authors,
       status: parsedStatus,
+      aboutMeBio: typeof aboutMeBio === 'string' ? aboutMeBio.trim().slice(0, 280) : profile.aboutMeBio,
+      aboutMeLink: aboutMeLink !== undefined ? normalizeAboutMeLink(aboutMeLink) : profile.aboutMeLink,
       positionX: Number.isNaN(parsedPositionX) ? profile.positionX : parsedPositionX,
       positionY: Number.isNaN(parsedPositionY) ? profile.positionY : parsedPositionY,
       avatarIcon: parsedAvatarIcon,
@@ -378,6 +405,39 @@ app.delete('/api/profile/:username/status-like', async (req, res) => {
   await handleStatusLike(req, res, -1);
 });
 
+async function handleFeelingLike(req: express.Request, res: express.Response, delta: 1 | -1) {
+  const username = String(req.params.username || '').trim();
+  const bookIndex = Number(req.params.bookIndex);
+  const feeling = req.body?.feeling;
+  const title = req.body?.title;
+  if (!username || !Number.isInteger(bookIndex) || bookIndex < 0 || bookIndex >= PROFILE_BOOK_SLOT_COUNT
+    || typeof feeling !== 'string' || !feeling.trim() || typeof title !== 'string') {
+    return res.status(400).json({ error: 'A valid username, book index, title, and feeling are required.' });
+  }
+
+  try {
+    const profile = await getProfile(username);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found.' });
+    }
+    const book = profile.books[bookIndex];
+    if (!book || book.feeling !== feeling || book.title.trim() !== title.trim()) {
+      return res.status(409).json({ error: 'This feeling has changed. Please try again.' });
+    }
+    const books = profile.books.map((entry, index) => index === bookIndex
+      ? { ...entry, feelingLikeCount: Math.max(0, normalizeLikeCount(entry.feelingLikeCount) + delta) }
+      : entry);
+    const updatedProfile = await updateProfile({ ...profile, books }, false);
+    return res.json({ username, bookIndex, feelingLikeCount: updatedProfile.books[bookIndex].feelingLikeCount, profile: updatedProfile });
+  } catch (error) {
+    console.error('Feeling like error', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+app.post('/api/profile/:username/books/:bookIndex/feeling-like', (req, res) => handleFeelingLike(req, res, 1));
+app.delete('/api/profile/:username/books/:bookIndex/feeling-like', (req, res) => handleFeelingLike(req, res, -1));
+
 app.post('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
   const username = String(req.params.username || '').trim();
   if (!username) {
@@ -385,8 +445,8 @@ app.post('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
   }
 
   const parsedBookIndex = Number(req.params.bookIndex);
-  if (!Number.isInteger(parsedBookIndex) || parsedBookIndex < 0 || parsedBookIndex > 2) {
-    return res.status(400).json({ error: 'bookIndex must be 0, 1, or 2' });
+  if (!Number.isInteger(parsedBookIndex) || parsedBookIndex < 0 || parsedBookIndex >= PROFILE_BOOK_SLOT_COUNT) {
+    return res.status(400).json({ error: 'bookIndex must be between 0 and 3' });
   }
 
   try {
@@ -397,8 +457,10 @@ app.post('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
 
     const nextBooks: ProfileBookPayload[] = Array.from({ length: PROFILE_BOOK_SLOT_COUNT }, (_unused, index) => {
       const source = profile.books?.[index] ?? {
-        title: index === BETWEEN_BOOKS_INDEX ? BETWEEN_BOOKS_TITLE : (index === 0 ? profile.currentBook : ''),
-        author: index === BETWEEN_BOOKS_INDEX ? '' : (index === 0 ? profile.currentAuthor : ''),
+        title: index === 0 ? profile.currentBook : '',
+        author: index === 0 ? profile.currentAuthor : '',
+        imageData: '',
+        feeling: '',
         currentProgress: index === 0 ? profile.currentPage : 0,
         totalProgress: index === 0 ? profile.totalPageCount : 0,
         currentRating: 0,
@@ -413,7 +475,9 @@ app.post('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
       };
     });
 
-    const selectedBook = nextBooks[profile.currentBookIndex] ?? nextBooks[0];
+    const selectedBook = profile.currentBookIndex === BETWEEN_BOOKS_INDEX
+      ? betweenBooksEntry()
+      : nextBooks[profile.currentBookIndex] ?? nextBooks[0];
     const updatedProfile = await updateProfile({
       ...profile,
       books: nextBooks,
@@ -444,8 +508,8 @@ app.delete('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
   }
 
   const parsedBookIndex = Number(req.params.bookIndex);
-  if (!Number.isInteger(parsedBookIndex) || parsedBookIndex < 0 || parsedBookIndex > 2) {
-    return res.status(400).json({ error: 'bookIndex must be 0, 1, or 2' });
+  if (!Number.isInteger(parsedBookIndex) || parsedBookIndex < 0 || parsedBookIndex >= PROFILE_BOOK_SLOT_COUNT) {
+    return res.status(400).json({ error: 'bookIndex must be between 0 and 3' });
   }
 
   try {
@@ -456,8 +520,10 @@ app.delete('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
 
     const nextBooks: ProfileBookPayload[] = Array.from({ length: PROFILE_BOOK_SLOT_COUNT }, (_unused, index) => {
       const source = profile.books?.[index] ?? {
-        title: index === BETWEEN_BOOKS_INDEX ? BETWEEN_BOOKS_TITLE : (index === 0 ? profile.currentBook : ''),
-        author: index === BETWEEN_BOOKS_INDEX ? '' : (index === 0 ? profile.currentAuthor : ''),
+        title: index === 0 ? profile.currentBook : '',
+        author: index === 0 ? profile.currentAuthor : '',
+        imageData: '',
+        feeling: '',
         currentProgress: index === 0 ? profile.currentPage : 0,
         totalProgress: index === 0 ? profile.totalPageCount : 0,
         currentRating: 0,
@@ -473,7 +539,9 @@ app.delete('/api/profile/:username/books/:bookIndex/like', async (req, res) => {
       };
     });
 
-    const selectedBook = nextBooks[profile.currentBookIndex] ?? nextBooks[0];
+    const selectedBook = profile.currentBookIndex === BETWEEN_BOOKS_INDEX
+      ? betweenBooksEntry()
+      : nextBooks[profile.currentBookIndex] ?? nextBooks[0];
     const updatedProfile = await updateProfile({
       ...profile,
       books: nextBooks,

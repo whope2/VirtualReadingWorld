@@ -9,7 +9,7 @@ const GHOST_WINDOW_MS = 60 * 60 * 1000;
 const BULLETIN_TEXT_MAX_LENGTH = 800;
 const BULLETIN_TIME_ZONE = 'America/New_York';
 const PROFILE_BOOK_SLOT_COUNT = 4;
-const BETWEEN_BOOKS_INDEX = 3;
+const BETWEEN_BOOKS_INDEX = 4;
 const BETWEEN_BOOKS_TITLE = 'Between books';
 
 const bulletinDayKeyFormatter = new Intl.DateTimeFormat('en-US', {
@@ -237,6 +237,8 @@ export type Profile = {
   progressMode: 'pages' | 'audio';
   currentBookIndex: number;
   books: ProfileBook[];
+  aboutMeBio: string;
+  aboutMeLink: string;
   favoriteAuthors: string[];
   status: string;
   recentStatuses: string[];
@@ -255,6 +257,8 @@ export type ProfileBook = {
   title: string;
   author: string;
   imageData?: string;
+  feeling?: string;
+  feelingLikeCount?: number;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -820,19 +824,6 @@ function normalizeRating(value: unknown): number {
 }
 
 function createDefaultBook(index: number): ProfileBook {
-  if (index === BETWEEN_BOOKS_INDEX) {
-    return {
-      title: BETWEEN_BOOKS_TITLE,
-      author: '',
-      currentProgress: 0,
-      totalProgress: 0,
-      currentRating: 0,
-      likeCount: 0,
-      format: 'physical',
-      progressMode: 'pages',
-    };
-  }
-
   if (index === 0) {
     return {
       title: '',
@@ -866,21 +857,6 @@ function clampBookIndex(value: unknown): number {
   return Math.min(BETWEEN_BOOKS_INDEX, Math.max(0, Math.floor(parsed)));
 }
 
-function normalizeBetweenBookEntry(book: ProfileBook): ProfileBook {
-  return {
-    ...book,
-    title: BETWEEN_BOOKS_TITLE,
-    author: '',
-    imageData: '',
-    currentProgress: 0,
-    totalProgress: 0,
-    currentRating: 0,
-    likeCount: 0,
-    format: 'physical',
-    progressMode: 'pages',
-  };
-}
-
 function normalizeBookEntry(value: unknown, fallback: ProfileBook): ProfileBook {
   const source = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   const format = normalizeBookFormat(source.format ?? fallback.format);
@@ -894,6 +870,8 @@ function normalizeBookEntry(value: unknown, fallback: ProfileBook): ProfileBook 
     title: typeof source.title === 'string' ? source.title : fallback.title,
     author: typeof source.author === 'string' ? source.author : fallback.author,
     imageData: normalizeBulletinImageData(source.imageData ?? fallback.imageData),
+    feeling: typeof source.feeling === 'string' ? source.feeling.replace(/[\r\n]+/g, ' ').slice(0, 160) : '',
+    feelingLikeCount: normalizeLikeCount(source.feelingLikeCount ?? fallback.feelingLikeCount ?? 0),
     currentProgress: Number.isFinite(safeCurrent) && safeCurrent >= 0 ? Math.floor(safeCurrent) : 0,
     totalProgress: Number.isFinite(safeTotal) && safeTotal >= 0 ? Math.floor(safeTotal) : 0,
     currentRating: safeRating,
@@ -913,6 +891,8 @@ function parseBooksData(value: unknown, singleBookFallback: ProfileBook): Profil
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) {
         rawBooks = parsed;
+      } else if (typeof parsed === 'object' && parsed !== null && Array.isArray(parsed.books)) {
+        rawBooks = parsed.books;
       }
     } catch {
       rawBooks = [];
@@ -922,15 +902,41 @@ function parseBooksData(value: unknown, singleBookFallback: ProfileBook): Profil
   const books: ProfileBook[] = [];
   for (let index = 0; index < PROFILE_BOOK_SLOT_COUNT; index += 1) {
     const fallback = index === 0 ? singleBookFallback : createDefaultBook(index);
-    const normalizedBook = normalizeBookEntry(rawBooks[index], fallback);
-    books.push(index === BETWEEN_BOOKS_INDEX ? normalizeBetweenBookEntry(normalizedBook) : normalizedBook);
+    const rawBook = rawBooks[index] as Record<string, unknown> | undefined;
+    const isLegacyBetweenBooksSlot = index === PROFILE_BOOK_SLOT_COUNT - 1
+      && typeof rawBook?.title === 'string'
+      && rawBook.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase();
+    books.push(normalizeBookEntry(isLegacyBetweenBooksSlot ? undefined : rawBook, fallback));
   }
 
   return books;
 }
 
-function serializeBooksData(books: ProfileBook[]): string {
-  return JSON.stringify(books);
+function parseAboutMeData(value: unknown): { aboutMeBio: string; aboutMeLink: string } {
+  let parsed = value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { aboutMeBio: '', aboutMeLink: '' };
+  }
+  const source = parsed as Record<string, unknown>;
+  return {
+    aboutMeBio: typeof source.aboutMeBio === 'string' ? source.aboutMeBio.slice(0, 280) : '',
+    aboutMeLink: typeof source.aboutMeLink === 'string' ? source.aboutMeLink.slice(0, 500) : '',
+  };
+}
+
+function serializeBooksData(books: ProfileBook[], aboutMeBio = '', aboutMeLink = ''): string {
+  return JSON.stringify({
+    books,
+    aboutMeBio: typeof aboutMeBio === 'string' ? aboutMeBio.trim().slice(0, 280) : '',
+    aboutMeLink: typeof aboutMeLink === 'string' ? aboutMeLink.trim().slice(0, 500) : '',
+  });
 }
 
 function mapProfileRow(row: any): Profile {
@@ -945,8 +951,16 @@ function mapProfileRow(row: any): Profile {
     progressMode: normalizeProgressMode(row.progress_mode ?? row.progressMode),
   };
   const books = parseBooksData(row.books_data ?? row.booksData, singleBookFallback);
-  const currentBookIndex = clampBookIndex(row.current_book_index ?? row.currentBookIndex ?? 0);
-  const selectedBook = books[currentBookIndex] ?? books[0] ?? createDefaultBook(0);
+  const aboutMe = parseAboutMeData(row.books_data ?? row.booksData);
+  const storedBookIndex = clampBookIndex(row.current_book_index ?? row.currentBookIndex ?? 0);
+  const currentBookIndex = storedBookIndex === PROFILE_BOOK_SLOT_COUNT - 1
+    && typeof (row.current_book ?? row.currentBook) === 'string'
+    && String(row.current_book ?? row.currentBook).trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase()
+    ? BETWEEN_BOOKS_INDEX
+    : storedBookIndex;
+  const selectedBook = currentBookIndex === BETWEEN_BOOKS_INDEX
+    ? { ...createDefaultBook(0), title: BETWEEN_BOOKS_TITLE }
+    : books[currentBookIndex] ?? books[0] ?? createDefaultBook(0);
 
   return {
     username: row.username,
@@ -957,6 +971,7 @@ function mapProfileRow(row: any): Profile {
     progressMode: selectedBook.progressMode,
     currentBookIndex,
     books,
+    ...aboutMe,
     favoriteAuthors: parseFavoriteAuthors(row.favorite_authors ?? row.favoriteAuthors),
     status: normalizeStatus(row.status),
     recentStatuses: normalizeRecentStatuses(row.recent_statuses_json ?? row.recentStatuses),
@@ -1552,6 +1567,8 @@ export async function createProfile(username: string): Promise<Profile> {
     books,
     favoriteAuthors: [],
     status: 'Reading',
+    aboutMeBio: '',
+    aboutMeLink: '',
     positionX: 0.5,
     positionY: 0.5,
     avatarIcon: '📚',
@@ -1567,7 +1584,7 @@ export async function createProfile(username: string): Promise<Profile> {
   if (databaseType === 'postgres') {
     await pool.query(
       'INSERT INTO profiles(username, current_book, current_author, current_page, total_page_count, progress_mode, books_data, current_book_index, favorite_authors, status, position_x, position_y, avatar_icon, avatar_image_data, background_scene, is_active, login_time_utc, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) ON CONFLICT (username) DO NOTHING',
-      [defaultProfile.username, defaultProfile.currentBook, defaultProfile.currentAuthor, defaultProfile.currentPage, defaultProfile.totalPageCount, defaultProfile.progressMode, serializeBooksData(defaultProfile.books), defaultProfile.currentBookIndex, serializeFavoriteAuthors(defaultProfile.favoriteAuthors), defaultProfile.status, toStoredPosition(defaultProfile.positionX), toStoredPosition(defaultProfile.positionY), defaultProfile.avatarIcon, defaultProfile.avatarImageData, defaultProfile.backgroundScene, defaultProfile.isActive, defaultProfile.loginTimeUtc, Date.now()]
+      [defaultProfile.username, defaultProfile.currentBook, defaultProfile.currentAuthor, defaultProfile.currentPage, defaultProfile.totalPageCount, defaultProfile.progressMode, serializeBooksData(defaultProfile.books, defaultProfile.aboutMeBio, defaultProfile.aboutMeLink), defaultProfile.currentBookIndex, serializeFavoriteAuthors(defaultProfile.favoriteAuthors), defaultProfile.status, toStoredPosition(defaultProfile.positionX), toStoredPosition(defaultProfile.positionY), defaultProfile.avatarIcon, defaultProfile.avatarImageData, defaultProfile.backgroundScene, defaultProfile.isActive, defaultProfile.loginTimeUtc, Date.now()]
     );
     return defaultProfile;
   }
@@ -1582,7 +1599,7 @@ export async function createProfile(username: string): Promise<Profile> {
     defaultProfile.currentPage,
     defaultProfile.totalPageCount,
     defaultProfile.progressMode,
-    serializeBooksData(defaultProfile.books),
+    serializeBooksData(defaultProfile.books, defaultProfile.aboutMeBio, defaultProfile.aboutMeLink),
     defaultProfile.currentBookIndex,
     serializeFavoriteAuthors(defaultProfile.favoriteAuthors),
     defaultProfile.status,
@@ -1616,17 +1633,18 @@ export async function updateProfile(profile: Profile, enforceActiveLimit = false
     progressMode: normalizeProgressMode(profile.progressMode),
   };
   const safeBooks = parseBooksData(profile.books, legacySelectedBook);
+  const isBetweenBooks = safeCurrentBookIndex === BETWEEN_BOOKS_INDEX;
   const safeSelectedBook = normalizeBookEntry({
-    ...safeBooks[safeCurrentBookIndex],
-    title: profile.currentBook,
-    author: profile.currentAuthor,
-    currentProgress: profile.currentPage,
-    totalProgress: profile.totalPageCount,
-    progressMode: profile.progressMode,
-  }, safeBooks[safeCurrentBookIndex] ?? legacySelectedBook);
-  safeBooks[safeCurrentBookIndex] = safeCurrentBookIndex === BETWEEN_BOOKS_INDEX
-    ? normalizeBetweenBookEntry(safeSelectedBook)
-    : safeSelectedBook;
+    ...(isBetweenBooks ? legacySelectedBook : safeBooks[safeCurrentBookIndex]),
+    title: isBetweenBooks ? BETWEEN_BOOKS_TITLE : profile.currentBook,
+    author: isBetweenBooks ? '' : profile.currentAuthor,
+    currentProgress: isBetweenBooks ? 0 : profile.currentPage,
+    totalProgress: isBetweenBooks ? 0 : profile.totalPageCount,
+    progressMode: isBetweenBooks ? 'pages' : profile.progressMode,
+  }, isBetweenBooks ? legacySelectedBook : safeBooks[safeCurrentBookIndex] ?? legacySelectedBook);
+  if (!isBetweenBooks) {
+    safeBooks[safeCurrentBookIndex] = safeSelectedBook;
+  }
 
   const now = Date.now();
   const cutoff = now - INACTIVITY_WINDOW_MS;
@@ -1717,7 +1735,7 @@ export async function updateProfile(profile: Profile, enforceActiveLimit = false
              recent_statuses_json = $19
          WHERE username = $1
            RETURNING username, current_book, current_author, current_page, total_page_count, progress_mode, books_data, current_book_index, favorite_authors, status, recent_statuses_json, position_x, position_y, avatar_icon, avatar_image_data, background_scene, is_active, login_time_utc, is_ghost, status_like_count`,
-          [profile.username, safeSelectedBook.title, safeSelectedBook.author, safeSelectedBook.currentProgress, safeSelectedBook.totalProgress, safeSelectedBook.progressMode, serializeBooksData(safeBooks), safeCurrentBookIndex, serializeFavoriteAuthors(profile.favoriteAuthors), safeStatus, toStoredPosition(profile.positionX), toStoredPosition(profile.positionY), profile.avatarIcon, safeAvatarImageData, profile.backgroundScene, profile.isActive, persistedLoginTimeUtc, now, JSON.stringify(nextRecentStatuses)]
+          [profile.username, safeSelectedBook.title, safeSelectedBook.author, safeSelectedBook.currentProgress, safeSelectedBook.totalProgress, safeSelectedBook.progressMode, serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink), safeCurrentBookIndex, serializeFavoriteAuthors(profile.favoriteAuthors), safeStatus, toStoredPosition(profile.positionX), toStoredPosition(profile.positionY), profile.avatarIcon, safeAvatarImageData, profile.backgroundScene, profile.isActive, persistedLoginTimeUtc, now, JSON.stringify(nextRecentStatuses)]
       );
 
       await client.query('COMMIT');
@@ -1825,7 +1843,7 @@ INSERT INTO profiles(username, current_book, current_author, current_page, total
       safeSelectedBook.currentProgress,
       safeSelectedBook.totalProgress,
       safeSelectedBook.progressMode,
-      serializeBooksData(safeBooks),
+      serializeBooksData(safeBooks, profile.aboutMeBio, profile.aboutMeLink),
       safeCurrentBookIndex,
       serializeFavoriteAuthors(profile.favoriteAuthors),
       safeStatus,

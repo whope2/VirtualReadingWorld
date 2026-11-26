@@ -33,6 +33,12 @@ header p {
   color: #2b3b4e;
 }
 
+header .app-tagline {
+  font-family: 'Iowan Old Style', 'Baskerville', 'Palatino Linotype', 'Book Antiqua', 'Times New Roman', serif;
+  font-size: 1.25rem;
+  font-style: italic;
+}
+
 .card {
   width: min(600px, 100%);
   padding: 24px;
@@ -448,10 +454,15 @@ header p {
   }
 }
 
-.tooltip-chat-row {
+.tooltip-actions {
   margin-top: 8px;
+}
+
+.tooltip-chat-row {
+  margin-top: 0;
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
 }
 
 .tooltip-chat-button {
@@ -469,6 +480,60 @@ header p {
 
 .tooltip-chat-button:hover {
   background: #dcebff;
+}
+
+.about-me-popup {
+  margin-top: 7px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(12, 24, 46, 0.96);
+  color: #ffffff;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.about-me-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.about-me-popup-header strong {
+  overflow-wrap: anywhere;
+}
+
+.about-me-popup-close {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.about-me-popup p {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.about-me-popup .about-me-empty {
+  color: rgba(255, 255, 255, 0.68);
+  font-style: italic;
+}
+
+.about-me-popup a {
+  display: block;
+  color: #b9dcff;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bulletin-board-header {
@@ -1268,6 +1333,32 @@ header p {
   overflow-wrap: anywhere;
 }
 
+.tooltip-book-feeling {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 5px;
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-style: italic;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.tooltip-book-feeling-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tooltip-feeling-like {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+}
+
 .tooltip-row > span:first-child {
   flex-shrink: 0;
 }
@@ -1300,6 +1391,33 @@ header p {
   width: 100%;
   margin-top: 0;
   margin-bottom: 2px;
+}
+
+.tooltip-book-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: auto;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.tooltip-book-nav-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.tooltip-book-nav-button:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .tooltip-like-button {
@@ -1727,7 +1845,7 @@ header p {
 .book-slot-tabs {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 34px;
   gap: 6px;
 }
 
@@ -1754,6 +1872,13 @@ header p {
   color: #ffffff;
   border-color: #1f6feb;
   box-shadow: 0 6px 16px rgba(31, 111, 235, 0.28);
+}
+
+.between-books-tab {
+  display: grid;
+  place-items: center;
+  padding: 6px 0;
+  font-size: 0.9rem;
 }
 
 .book-editor-box {
@@ -1978,11 +2103,48 @@ header p {
   margin-top: 10px;
 }
 
+.profile-about-me-section-card h3 {
+  margin: 0 0 8px;
+  color: #334c76;
+  font-size: 0.9rem;
+}
+
+.profile-about-me-section-card .about-me-bio-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 14px;
+  border: 1px solid #d8d8d8;
+  border-radius: 12px;
+  background: #f7f9fc;
+  color: #1d293f;
+  font-size: 1rem;
+  line-height: 1.35;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
 .book-cover-editor {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
+}
+
+.book-cover-heading-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.book-cover-heading-row > label:first-child {
+  margin: 0;
+}
+
+.book-cover-upload-button {
+  min-width: 108px;
+  min-height: 36px;
+  padding: 8px 18px;
 }
 
 .book-cover-preview {
@@ -1993,12 +2155,10 @@ header p {
   background: #edf2f7;
 }
 
-.book-cover-actions {
+.book-cover-preview-row {
   display: flex;
   align-items: center;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
 }
 
 .book-cover-remove-button {

@@ -10,6 +10,8 @@ type Profile = {
   progressMode: 'pages' | 'audio';
   currentBookIndex: number;
   books: ProfileBook[];
+  aboutMeBio?: string;
+  aboutMeLink?: string;
   favoriteAuthors: string[];
   status: string;
   positionX: number;
@@ -33,20 +35,20 @@ const AVATAR_SIZE = 48;
 const DEFAULT_POSITION = { x: 50, y: 50 };
 const DEFAULT_NORMALIZED_POSITION = { x: 0.5, y: 0.5 };
 const POSITION_SCALE = 10000;
-const BETWEEN_BOOKS_INDEX = 3;
+const BETWEEN_BOOKS_INDEX = 4;
 const BOOK_SLOT_COUNT = 4;
 const BETWEEN_BOOKS_TITLE = 'Between books';
 const BOOK_SLOT_OPTIONS: Array<{ index: number; label: string }> = [
   { index: 0, label: 'Book 1' },
   { index: 1, label: 'Book 2' },
   { index: 2, label: 'Book 3' },
-  { index: BETWEEN_BOOKS_INDEX, label: BETWEEN_BOOKS_TITLE },
+  { index: 3, label: 'Book 4' },
 ];
 const AVATAR_OPTIONS = ['📚', '📗', '📒', '📕', '📙', '📓', '🧠', '🦉', '🐰', '🧶', '🗂️', '📜', '🪶', '☕', '🍵', '🐶', '🐱', '🕶️'];
 const SCENE_OPTIONS: SceneOption[] = [
   {
     label: 'Ocean beach',
-    shortLabel: 'Ocean',
+    shortLabel: 'Beach',
     value: 'ocean-beach',
     imagePath: 'ocean-beach.jpg',
     overlay: 'linear-gradient(135deg, rgba(10, 45, 74, 0.2), rgba(61, 152, 208, 0.2))',
@@ -110,6 +112,8 @@ type ProfileBook = {
   title: string;
   author: string;
   imageData?: string;
+  feeling?: string;
+  feelingLikeCount?: number;
   currentProgress: number;
   totalProgress: number;
   currentRating: number;
@@ -122,6 +126,7 @@ type ProfileBookDraft = {
   title: string;
   author: string;
   imageData: string;
+  feeling: string;
   currentProgress: string;
   totalProgress: string;
   currentRating: number;
@@ -224,6 +229,11 @@ function progressModeForFormat(format: BookFormat): ProgressMode {
 
 function formatBadgeEmoji(format: BookFormat): string {
   return BOOK_FORMAT_OPTIONS.find((option) => option.value === format)?.emoji ?? '📖';
+}
+
+function isReaderBetweenBooks(reader: Pick<Profile, 'currentBookIndex' | 'currentBook'>): boolean {
+  return reader.currentBookIndex === BETWEEN_BOOKS_INDEX
+    || reader.currentBook.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase();
 }
 
 function getTooltipPlacement(
@@ -540,7 +550,7 @@ function createObserverProfile(username: string): Profile {
     { title: 'Observing', author: '—', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
     { title: '', author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
     { title: '', author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
-    { title: BETWEEN_BOOKS_TITLE, author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
+    { title: '', author: '', currentProgress: 0, totalProgress: 0, currentRating: 0, likeCount: 0, format: 'physical', progressMode: 'pages' },
   ];
 
   return {
@@ -564,19 +574,6 @@ function createObserverProfile(username: string): Profile {
 }
 
 function createDefaultBook(index: number): ProfileBook {
-  if (index === BETWEEN_BOOKS_INDEX) {
-    return {
-      title: BETWEEN_BOOKS_TITLE,
-      author: '',
-      currentProgress: 0,
-      totalProgress: 0,
-      currentRating: 0,
-      likeCount: 0,
-      format: 'physical',
-      progressMode: 'pages',
-    };
-  }
-
   if (index === 0) {
     return {
       title: '',
@@ -609,21 +606,6 @@ function normalizeBookFormat(value: unknown): BookFormat {
   return 'physical';
 }
 
-function normalizeBetweenBooksEntry(book: ProfileBook): ProfileBook {
-  return {
-    ...book,
-    title: BETWEEN_BOOKS_TITLE,
-    author: '',
-    imageData: '',
-    currentProgress: 0,
-    totalProgress: 0,
-    currentRating: 0,
-    likeCount: 0,
-    format: 'physical',
-    progressMode: 'pages',
-  };
-}
-
 function clampBookIndex(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -645,9 +627,18 @@ function normalizeIncomingBooks(profile: Partial<Profile>): { books: ProfileBook
   };
 
   const sourceBooks = Array.isArray(profile.books) ? profile.books : [];
+  const storedBookIndex = clampBookIndex(profile.currentBookIndex ?? 0);
+  const legacyBetweenBooksSelection = storedBookIndex === BOOK_SLOT_COUNT - 1
+    && (profile.currentBook?.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase()
+      || (typeof sourceBooks[BOOK_SLOT_COUNT - 1]?.title === 'string'
+        && sourceBooks[BOOK_SLOT_COUNT - 1].title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase()));
   const books: ProfileBook[] = Array.from({ length: BOOK_SLOT_COUNT }, (_unused, index) => {
-    const source = sourceBooks[index];
+    const rawSource = sourceBooks[index];
     const fallback = index === 0 ? fallbackBook : createDefaultBook(index);
+    const legacyBetweenBook = index === BOOK_SLOT_COUNT - 1
+      && typeof rawSource?.title === 'string'
+      && rawSource.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase();
+    const source = legacyBetweenBook ? undefined : rawSource;
     const format = normalizeBookFormat(source?.format ?? fallback.format);
     const progressMode = progressModeForFormat(format);
     const currentProgress = Number(source?.currentProgress ?? fallback.currentProgress ?? 0);
@@ -659,6 +650,8 @@ function normalizeIncomingBooks(profile: Partial<Profile>): { books: ProfileBook
       title: typeof source?.title === 'string' ? source.title : fallback.title,
       author: typeof source?.author === 'string' ? source.author : fallback.author,
       imageData: typeof source?.imageData === 'string' ? source.imageData : '',
+      feeling: typeof source?.feeling === 'string' ? source.feeling.replace(/[\r\n]+/g, ' ').slice(0, 160) : '',
+      feelingLikeCount: normalizeLikeCount(source?.feelingLikeCount ?? 0),
       currentProgress: Number.isFinite(currentProgress) && currentProgress >= 0 ? Math.floor(currentProgress) : 0,
       totalProgress: Number.isFinite(totalProgress) && totalProgress >= 0 ? Math.floor(totalProgress) : 0,
       currentRating,
@@ -667,10 +660,10 @@ function normalizeIncomingBooks(profile: Partial<Profile>): { books: ProfileBook
       progressMode,
     };
 
-    return index === BETWEEN_BOOKS_INDEX ? normalizeBetweenBooksEntry(normalizedBook) : normalizedBook;
+    return normalizedBook;
   });
 
-  const currentBookIndex = clampBookIndex(profile.currentBookIndex ?? 0);
+  const currentBookIndex = legacyBetweenBooksSelection ? BETWEEN_BOOKS_INDEX : storedBookIndex;
   return { books, currentBookIndex };
 }
 
@@ -679,6 +672,7 @@ function profileToBookDrafts(books: ProfileBook[]): ProfileBookDraft[] {
     title: book.title,
     author: book.author,
     imageData: book.imageData || '',
+    feeling: book.feeling || '',
     format: book.format,
     currentRating: normalizeRating(book.currentRating ?? 0),
     currentProgress: formatProgressInput(book.currentProgress, progressModeForFormat(book.format)),
@@ -697,6 +691,16 @@ function formatReaderBadgeLabel(username: string, status: string | null | undefi
   const trimmedUsername = username?.trim() || 'Reader';
   const trimmedStatus = typeof status === 'string' ? status.trim() : '';
   return trimmedStatus ? `${trimmedUsername}: ${trimmedStatus}` : trimmedUsername;
+}
+
+function safeExternalUrl(value: string | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseAudioDurationToMinutes(value: string): number | null {
@@ -793,6 +797,10 @@ function buildBookLikeSessionKey(username: string, bookIndex: number, book: Part
   return `${username}::${bookIndex}::${title}::${author}::${progressMode}::${currentProgress}/${totalProgress}`;
 }
 
+function buildFeelingLikeSessionKey(username: string, bookIndex: number, book: ProfileBook | undefined): string {
+  return JSON.stringify([username, bookIndex, book?.title.trim() || '', book?.feeling || '']);
+}
+
 function trimAudioBufferEdges(buffer: AudioBuffer, threshold = 0.008, edgePaddingSeconds = 0.02): AudioBuffer {
   if (buffer.numberOfChannels === 0 || buffer.length === 0) {
     return buffer;
@@ -842,6 +850,8 @@ function App() {
     editingBookIndex: 0,
     favoriteAuthors: '',
     backgroundScene: 'ocean-beach',
+    aboutMeBio: '',
+    aboutMeLink: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -854,6 +864,8 @@ function App() {
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [hoveredReaderUsername, setHoveredReaderUsername] = useState<string | null>(null);
   const [pinnedReaderUsername, setPinnedReaderUsername] = useState<string | null>(null);
+  const [tooltipBookSelection, setTooltipBookSelection] = useState<{ username: string; bookIndex: number; currentBookIndex: number } | null>(null);
+  const [aboutMePopupUsername, setAboutMePopupUsername] = useState<string | null>(null);
   const [announcementMessage, setAnnouncementMessage] = useState('');
   const [otherReaders, setOtherReaders] = useState<SceneReader[]>([]);
   const [activeReaderLimit, setActiveReaderLimit] = useState(10);
@@ -868,6 +880,8 @@ function App() {
   const [browserNow, setBrowserNow] = useState(Date.now());
   const [likedBookSessionKeys, setLikedBookSessionKeys] = useState<Set<string>>(new Set());
   const [pendingLikeKey, setPendingLikeKey] = useState<string | null>(null);
+  const [likedFeelingSessionKeys, setLikedFeelingSessionKeys] = useState<Set<string>>(new Set());
+  const [pendingFeelingLikeKey, setPendingFeelingLikeKey] = useState<string | null>(null);
   const [bulletinPosts, setBulletinPosts] = useState<BulletinPost[]>([]);
   const [bulletinDraft, setBulletinDraft] = useState('');
   const [bulletinImageDraft, setBulletinImageDraft] = useState('');
@@ -886,6 +900,7 @@ function App() {
   const [pendingStatusLikeKey, setPendingStatusLikeKey] = useState<string | null>(null);
   const [likedStatusSessionKeys, setLikedStatusSessionKeys] = useState<Set<string>>(new Set());
   const [myStatusLikeCount, setMyStatusLikeCount] = useState(0);
+  const [mySceneBooks, setMySceneBooks] = useState<{ username: string; books: ProfileBook[] } | null>(null);
   const [likedChatSessionKeys, setLikedChatSessionKeys] = useState<Set<string>>(new Set());
   const [chatImageDraft, setChatImageDraft] = useState('');
   const [isPostingChat, setIsPostingChat] = useState(false);
@@ -918,6 +933,7 @@ function App() {
   const suppressProfileStateRef = useRef(false);
   const sessionVersionRef = useRef(0);
   const likeStorageKey = profile?.username ? `vwr-liked-books:${profile.username}` : null;
+  const feelingLikeStorageKey = profile?.username ? `vwr-liked-feelings:${profile.username}` : null;
   const bulletinLikeStorageKey = profile?.username ? `vwr-liked-bulletin:${profile.username}` : null;
   const chatLikeStorageKey = profile?.username ? `vwr-liked-chat:${profile.username}` : null;
   const statusLikeStorageKey = profile?.username ? `vwr-liked-status:${profile.username}` : null;
@@ -960,6 +976,8 @@ function App() {
               editingBookIndex: currentBookIndex,
               favoriteAuthors: observerProfile.favoriteAuthors.join(', '),
               backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
+              aboutMeBio: '',
+              aboutMeLink: '',
             });
             setStatusText(observerProfile.status || 'Reading');
             setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -1103,6 +1121,25 @@ function App() {
   }, [likedBookSessionKeys, profile?.username, profile?.isObserver, likeStorageKey]);
 
   useEffect(() => {
+    if (!feelingLikeStorageKey || profile?.isObserver) {
+      setLikedFeelingSessionKeys(new Set());
+      return;
+    }
+    try {
+      const parsed = JSON.parse(window.sessionStorage.getItem(feelingLikeStorageKey) || '[]');
+      setLikedFeelingSessionKeys(new Set(Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []));
+    } catch {
+      setLikedFeelingSessionKeys(new Set());
+    }
+  }, [feelingLikeStorageKey, profile?.isObserver]);
+
+  useEffect(() => {
+    if (feelingLikeStorageKey && !profile?.isObserver) {
+      window.sessionStorage.setItem(feelingLikeStorageKey, JSON.stringify(Array.from(likedFeelingSessionKeys)));
+    }
+  }, [feelingLikeStorageKey, likedFeelingSessionKeys, profile?.isObserver]);
+
+  useEffect(() => {
     if (!profile?.username || !bulletinLikeStorageKey) {
       setLikedBulletinSessionKeys(new Set());
       return;
@@ -1201,6 +1238,8 @@ function App() {
         editingBookIndex: currentBookIndex,
         favoriteAuthors: profile.favoriteAuthors.join(', '),
         backgroundScene: current.backgroundScene || profile.backgroundScene || 'ocean-beach',
+        aboutMeBio: profile.aboutMeBio || '',
+        aboutMeLink: profile.aboutMeLink || '',
       }));
       setStatusText(profile.status || 'Reading');
       setScenePreview(profile.backgroundScene || 'ocean-beach');
@@ -1848,6 +1887,7 @@ function App() {
           const mine = data.find((item) => item.username === activeUsername);
           if (mine) {
             setMyStatusLikeCount(normalizeLikeCount(mine.statusLikeCount));
+            setMySceneBooks({ username: mine.username, books: normalizeIncomingBooks(mine).books });
           }
           const normalized = data
             .filter((item) => item.username !== activeUsername)
@@ -1902,7 +1942,7 @@ function App() {
 
   const persistProfile = async (
     overrides: Partial<Profile> = {},
-    mode: 'all' | 'status' | 'books' = 'all',
+    mode: 'all' | 'status' | 'books' | 'aboutMe' = 'all',
   ) => {
     const currentProfile = profileRef.current ?? profile;
     const currentProfileForm = profileFormRef.current;
@@ -1927,6 +1967,7 @@ function App() {
     const shouldSendBooks = mode === 'all' || mode === 'books';
     const shouldSendStatus = mode === 'all' || mode === 'status';
     const shouldSendFullProfile = mode === 'all';
+    const shouldSendAboutMe = mode === 'all' || mode === 'aboutMe';
 
     const normalizedBooks: ProfileBook[] = [];
     let safeCurrentBookIndex = clampBookIndex(currentProfileForm.editingBookIndex);
@@ -1935,11 +1976,6 @@ function App() {
     if (shouldSendBooks) {
       for (let index = 0; index < currentProfileForm.books.length; index += 1) {
         const draft = currentProfileForm.books[index];
-        if (index === BETWEEN_BOOKS_INDEX) {
-          normalizedBooks.push(normalizeBetweenBooksEntry(createDefaultBook(BETWEEN_BOOKS_INDEX)));
-          continue;
-        }
-
         const draftMode = progressModeForFormat(draft.format);
         const currentProgress = parseDraftProgress(draft.currentProgress, draftMode);
         const totalProgress = parseDraftProgress(draft.totalProgress, draftMode);
@@ -1956,6 +1992,7 @@ function App() {
           title: draft.title,
           author: draft.author,
           imageData: draft.imageData,
+          feeling: draft.feeling.replace(/[\r\n]+/g, ' ').slice(0, 160),
           currentRating: normalizeRating(draft.currentRating ?? 0),
           likeCount: normalizeLikeCount(currentProfile.books?.[index]?.likeCount ?? 0),
           format: draft.format,
@@ -1966,7 +2003,9 @@ function App() {
       }
 
       safeCurrentBookIndex = clampBookIndex(currentProfileForm.editingBookIndex);
-      selectedBook = normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
+      selectedBook = safeCurrentBookIndex === BETWEEN_BOOKS_INDEX
+        ? { ...createDefaultBook(0), title: BETWEEN_BOOKS_TITLE }
+        : normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
     }
 
     const favoriteAuthors = currentProfileForm.favoriteAuthors
@@ -1991,6 +2030,13 @@ function App() {
       payload.currentPage = selectedBook?.currentProgress ?? currentProfile.currentPage;
       payload.totalPageCount = selectedBook?.totalProgress ?? currentProfile.totalPageCount;
       payload.progressMode = selectedBook?.progressMode ?? currentProfile.progressMode;
+      if (safeCurrentBookIndex === BETWEEN_BOOKS_INDEX) {
+        payload.currentBook = BETWEEN_BOOKS_TITLE;
+        payload.currentAuthor = '';
+        payload.currentPage = 0;
+        payload.totalPageCount = 0;
+        payload.progressMode = 'pages';
+      }
     }
 
     if (shouldSendStatus) {
@@ -2004,6 +2050,11 @@ function App() {
       payload.avatarImageData = nextAvatarImageData;
       payload.positionX = overrides.positionX !== undefined ? overrides.positionX : normalizedAvatarPosition.x;
       payload.positionY = overrides.positionY !== undefined ? overrides.positionY : normalizedAvatarPosition.y;
+    }
+
+    if (shouldSendAboutMe) {
+      payload.aboutMeBio = (overrides.aboutMeBio ?? currentProfileForm.aboutMeBio).trim().slice(0, 280);
+      payload.aboutMeLink = (overrides.aboutMeLink ?? currentProfileForm.aboutMeLink).trim().slice(0, 500);
     }
 
     if (overrides.positionX !== undefined) {
@@ -2089,8 +2140,16 @@ function App() {
           books: profileToBookDrafts(normalizedIncoming.books),
           editingBookIndex: normalizedIncoming.currentBookIndex,
           backgroundScene: savedScene,
+          aboutMeBio: data?.aboutMeBio || '',
+          aboutMeLink: data?.aboutMeLink || '',
         }));
         setScenePreview(savedScene);
+      } else if (shouldSendAboutMe) {
+        setProfileForm((current) => ({
+          ...current,
+          aboutMeBio: data?.aboutMeBio || '',
+          aboutMeLink: data?.aboutMeLink || '',
+        }));
       } else if (shouldSendBooks) {
         setProfileForm((current) => ({
           ...current,
@@ -2120,6 +2179,20 @@ function App() {
       return;
     }
     await persistProfile({}, 'status');
+  };
+
+  const saveAboutMe = async () => {
+    if (!profile || profile.isObserver) {
+      return;
+    }
+    if (profileForm.aboutMeLink.trim() && !safeExternalUrl(profileForm.aboutMeLink)) {
+      setError('Link must be a valid http or https URL.');
+      return;
+    }
+    await persistProfile({
+      aboutMeBio: profileForm.aboutMeBio,
+      aboutMeLink: profileForm.aboutMeLink,
+    }, 'aboutMe');
   };
 
   const saveBookInformation = async () => {
@@ -2155,6 +2228,7 @@ function App() {
         title: draft.title,
         author: draft.author,
         imageData: draft.imageData,
+        feeling: draft.feeling.replace(/[\r\n]+/g, ' ').slice(0, 160),
         currentRating: normalizeRating(draft.currentRating ?? 0),
         likeCount: normalizeLikeCount(profile.books?.[index]?.likeCount ?? 0),
         format: draft.format,
@@ -2164,7 +2238,9 @@ function App() {
       };
     });
     const safeCurrentBookIndex = safeEditingBookIndex;
-    const selectedBook = normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
+    const selectedBook = safeCurrentBookIndex === BETWEEN_BOOKS_INDEX
+      ? { ...createDefaultBook(0), title: BETWEEN_BOOKS_TITLE }
+      : normalizedBooks[safeCurrentBookIndex] ?? normalizedBooks[0];
     const favoriteAuthors = profileForm.favoriteAuthors
       .split(',')
       .map((name) => name.trim())
@@ -2195,13 +2271,15 @@ function App() {
       body: JSON.stringify({
         books: normalizedBooks,
         currentBookIndex: safeCurrentBookIndex,
-        currentBook: selectedBook?.title ?? leavingProfile.currentBook,
-        currentAuthor: selectedBook?.author ?? leavingProfile.currentAuthor,
-        currentPage: selectedBook?.currentProgress ?? leavingProfile.currentPage,
-        totalPageCount: selectedBook?.totalProgress ?? leavingProfile.totalPageCount,
-        progressMode: selectedBook?.progressMode ?? leavingProfile.progressMode,
+        currentBook: safeCurrentBookIndex === BETWEEN_BOOKS_INDEX ? BETWEEN_BOOKS_TITLE : selectedBook?.title ?? leavingProfile.currentBook,
+        currentAuthor: safeCurrentBookIndex === BETWEEN_BOOKS_INDEX ? '' : selectedBook?.author ?? leavingProfile.currentAuthor,
+        currentPage: safeCurrentBookIndex === BETWEEN_BOOKS_INDEX ? 0 : selectedBook?.currentProgress ?? leavingProfile.currentPage,
+        totalPageCount: safeCurrentBookIndex === BETWEEN_BOOKS_INDEX ? 0 : selectedBook?.totalProgress ?? leavingProfile.totalPageCount,
+        progressMode: safeCurrentBookIndex === BETWEEN_BOOKS_INDEX ? 'pages' : selectedBook?.progressMode ?? leavingProfile.progressMode,
         favoriteAuthors,
         status: nextStatus,
+        aboutMeBio: profileForm.aboutMeBio.trim().slice(0, 280),
+        aboutMeLink: profileForm.aboutMeLink.trim().slice(0, 500),
         backgroundScene: profileForm.backgroundScene || leavingProfile.backgroundScene || 'ocean-beach',
         avatarIcon: leavingProfile.avatarIcon,
       }),
@@ -2246,6 +2324,8 @@ function App() {
           editingBookIndex: currentBookIndex,
           favoriteAuthors: observerProfile.favoriteAuthors.join(', '),
           backgroundScene: observerProfile.backgroundScene || 'ocean-beach',
+          aboutMeBio: '',
+          aboutMeLink: '',
         });
         setStatusText(observerProfile.status || 'Reading');
         setAvatarPosition(toRenderedPosition(observerProfile.positionX, observerProfile.positionY, sceneRef.current?.clientWidth ?? 640, sceneRef.current?.clientHeight ?? 520));
@@ -2289,6 +2369,9 @@ function App() {
   };
 
   const activeTooltipUsername = pinnedReaderUsername ?? hoveredReaderUsername;
+  useEffect(() => {
+    setTooltipBookSelection(null);
+  }, [activeTooltipUsername]);
   const isSceneExpanded = isSceneImmersive || isSceneNativeFullscreen;
 
   const safeEditingBookIndex = clampBookIndex(profileForm.editingBookIndex);
@@ -2929,6 +3012,7 @@ function App() {
       }
 
       if (targetUsername === profile.username) {
+        setMySceneBooks({ username: targetUsername, books: normalizeIncomingBooks(incomingProfile).books });
         setProfile((current) => {
           if (!current) {
             return current;
@@ -2947,12 +3031,78 @@ function App() {
     }
   };
 
+  const toggleFeelingLike = async (event: React.MouseEvent<HTMLButtonElement>, reader: SceneReader, bookIndex: number, book: ProfileBook) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!profile || profile.isObserver || !book.feeling?.trim()) return;
+
+    const sessionKey = buildFeelingLikeSessionKey(reader.username, bookIndex, book);
+    if (pendingFeelingLikeKey) return;
+    const alreadyLiked = likedFeelingSessionKeys.has(sessionKey);
+    setPendingFeelingLikeKey(sessionKey);
+    try {
+      const response = await fetch(apiUrl(`/api/profile/${encodeURIComponent(reader.username)}/books/${bookIndex}/feeling-like?ts=${Date.now()}`), {
+        method: alreadyLiked ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: book.title, feeling: book.feeling }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.error || 'Unable to like this feeling right now.');
+        return;
+      }
+      setLikedFeelingSessionKeys((current) => {
+        const next = new Set(current);
+        if (alreadyLiked) next.delete(sessionKey);
+        else next.add(sessionKey);
+        return next;
+      });
+      const incomingProfile = data?.profile as Partial<Profile> | undefined;
+      if (incomingProfile) {
+        if (reader.username === profile.username) {
+          setMySceneBooks({ username: reader.username, books: normalizeIncomingBooks(incomingProfile).books });
+          setProfile((current) => current ? mergeIncomingReaderProfile(current, incomingProfile) : current);
+        } else {
+          setOtherReaders((current) => current.map((entry) => entry.username === reader.username ? mergeIncomingReaderProfile(entry, incomingProfile) : entry));
+        }
+      }
+    } catch {
+      setError('Unable to reach backend.');
+    } finally {
+      setPendingFeelingLikeKey(null);
+    }
+  };
+
   const renderReaderTooltip = (reader: SceneReader, tooltipClassName: string) => {
-    const safeBookIndex = clampBookIndex(reader.currentBookIndex);
+    const currentBookIndex = clampBookIndex(reader.currentBookIndex);
+    const availableBookIndices = (reader.books || [])
+      .slice(0, BOOK_SLOT_COUNT)
+      .map((book, index) => book?.title?.trim() ? index : -1)
+      .filter((index) => index >= 0);
+    const selectedBookIndex = tooltipBookSelection?.username === reader.username
+      && tooltipBookSelection.currentBookIndex === currentBookIndex
+      && availableBookIndices.includes(tooltipBookSelection.bookIndex)
+      ? tooltipBookSelection.bookIndex
+      : availableBookIndices.includes(currentBookIndex) ? currentBookIndex : availableBookIndices[0];
+    const safeBookIndex = selectedBookIndex ?? currentBookIndex;
     const currentBookDetails = reader.books?.[safeBookIndex];
-    const betweenBooksActive = safeBookIndex === BETWEEN_BOOKS_INDEX
+    const hasDisplayedBook = selectedBookIndex !== undefined;
+    const changeBook = (direction: number) => {
+      const position = availableBookIndices.indexOf(safeBookIndex);
+      const nextPosition = (position + direction + availableBookIndices.length) % availableBookIndices.length;
+      setTooltipBookSelection({ username: reader.username, bookIndex: availableBookIndices[nextPosition], currentBookIndex });
+    };
+    const polledBook = reader.username === profile?.username && mySceneBooks?.username === reader.username
+      ? mySceneBooks.books[safeBookIndex]
+      : undefined;
+    const matchingPolledBook = polledBook?.title.trim() === currentBookDetails?.title.trim() ? polledBook : undefined;
+    const feelingLikeKey = buildFeelingLikeSessionKey(reader.username, safeBookIndex, currentBookDetails);
+    const feelingAlreadyLiked = likedFeelingSessionKeys.has(feelingLikeKey);
+    const aboutMeLink = safeExternalUrl(reader.aboutMeLink);
+    const hasAboutMe = Boolean(reader.aboutMeBio?.trim() || aboutMeLink);
+    const betweenBooksActive = !hasDisplayedBook || safeBookIndex === BETWEEN_BOOKS_INDEX
       || (typeof currentBookDetails?.title === 'string' && currentBookDetails.title.trim().toLowerCase() === BETWEEN_BOOKS_TITLE.toLowerCase());
-    const likeCount = normalizeLikeCount(currentBookDetails?.likeCount ?? 0);
+    const likeCount = normalizeLikeCount(matchingPolledBook?.likeCount ?? currentBookDetails?.likeCount ?? 0);
     const likeSessionKey = buildBookLikeSessionKey(reader.username, safeBookIndex, currentBookDetails);
     const alreadyLiked = likedBookSessionKeys.has(likeSessionKey);
     const isPending = pendingLikeKey === likeSessionKey;
@@ -2966,6 +3116,13 @@ function App() {
       >
         {!betweenBooksActive && (
           <div className="tooltip-like-inline-row">
+            {availableBookIndices.length > 1 && (
+              <div className="tooltip-book-navigation" aria-label="Book navigation">
+                <button type="button" className="tooltip-book-nav-button" aria-label="Previous book" title="Previous book" onClick={() => changeBook(-1)}>‹</button>
+                <span aria-live="polite">{availableBookIndices.indexOf(safeBookIndex) + 1} / {availableBookIndices.length}</span>
+                <button type="button" className="tooltip-book-nav-button" aria-label="Next book" title="Next book" onClick={() => changeBook(1)}>›</button>
+              </div>
+            )}
             <button
               type="button"
               className={`tooltip-like-button ${alreadyLiked ? 'tooltip-like-button-done' : ''}`}
@@ -2978,25 +3135,53 @@ function App() {
             <span className="tooltip-like-count" aria-live="polite">{likeCount}</span>
           </div>
         )}
-        <div className="tooltip-book-content">
-          {!betweenBooksActive && currentBookDetails?.imageData && (
-            <img className="tooltip-book-cover" src={currentBookDetails.imageData} alt={`Cover of ${reader.currentBook || 'current book'}`} />
-          )}
-          <div className="tooltip-book-details">
-            <div className="tooltip-book-title">{betweenBooksActive ? BETWEEN_BOOKS_TITLE : reader.currentBook}</div>
-            {!betweenBooksActive && (
-              <div className="tooltip-book-author">{reader.currentAuthor}</div>
-            )}
+        {currentBookDetails?.imageData && !betweenBooksActive ? (
+          <div className="tooltip-book-content">
+            <img className="tooltip-book-cover" src={currentBookDetails.imageData} alt={`Cover of ${currentBookDetails.title}`} />
+            <div className="tooltip-book-details">
+              <div className="tooltip-book-title">{currentBookDetails.title}</div>
+              <div className="tooltip-book-author">{currentBookDetails.author}</div>
+            </div>
           </div>
-        </div>
+        ) : betweenBooksActive ? null : (
+          <>
+            <div className="tooltip-row">
+              <span className="tooltip-label">Title</span>
+              <span>{currentBookDetails?.title}</span>
+            </div>
+            <div className="tooltip-row">
+              <span className="tooltip-label">Author</span>
+              <span>{currentBookDetails?.author}</span>
+            </div>
+          </>
+        )}
         {!betweenBooksActive && (
           <div className="tooltip-row">
-            <span className="tooltip-label">{progressLabel(reader.progressMode)}</span>
+            <span className="tooltip-label">{progressLabel(currentBookDetails?.progressMode ?? 'pages')}</span>
             <span>
-              {formatProgressDisplay(reader.currentPage ?? 0, reader.totalPageCount ?? 0, reader.progressMode)}
-              {formatProgressPercent(reader.currentPage, reader.totalPageCount) && (
-                <span className="progress-percent">{formatProgressPercent(reader.currentPage, reader.totalPageCount)}</span>
+              {formatProgressDisplay(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0, currentBookDetails?.progressMode ?? 'pages')}
+              {formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0) && (
+                <span className="progress-percent">{formatProgressPercent(currentBookDetails?.currentProgress ?? 0, currentBookDetails?.totalProgress ?? 0)}</span>
               )}
+            </span>
+          </div>
+        )}
+        {!betweenBooksActive && currentBookDetails?.feeling?.trim() && (
+          <div className="tooltip-book-feeling">
+            <span className="tooltip-book-feeling-text">{currentBookDetails.feeling}</span>
+            <span className="tooltip-feeling-like">
+              <button
+                type="button"
+                className={`tooltip-like-button ${feelingAlreadyLiked ? 'tooltip-like-button-done' : ''}`}
+                onClick={(event) => toggleFeelingLike(event, reader, safeBookIndex, currentBookDetails)}
+                disabled={!profile || profile.isObserver || pendingFeelingLikeKey !== null}
+                aria-label={feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling'}
+                aria-pressed={feelingAlreadyLiked}
+                title={feelingAlreadyLiked ? 'Unlike this feeling' : 'Like this feeling'}
+              >
+                {feelingAlreadyLiked ? '♥' : '♡'}
+              </button>
+              <span className="tooltip-like-count" aria-live="polite">{normalizeLikeCount(matchingPolledBook?.feeling === currentBookDetails.feeling ? matchingPolledBook.feelingLikeCount : currentBookDetails.feelingLikeCount)}</span>
             </span>
           </div>
         )}
@@ -3005,15 +3190,46 @@ function App() {
             {renderRatingStars(reader.books[safeBookIndex].currentRating ?? 0)}
           </div>
         )}
-        {profile && !profile.isObserver && reader.username !== profile.username && (
-          <div className="tooltip-chat-row">
-            <button
-              type="button"
-              className="tooltip-chat-button"
-              onClick={(event) => startChatAbout(event, reader, betweenBooksActive ? '' : reader.currentBook)}
-            >
-              💬 Chat
-            </button>
+        {profile && (hasAboutMe || (reader.username !== profile.username && !profile.isObserver)) && (
+          <div className="tooltip-actions">
+            <div className="tooltip-chat-row">
+              {hasAboutMe && (
+                <button
+                  type="button"
+                  className="tooltip-chat-button"
+                  aria-expanded={aboutMePopupUsername === reader.username}
+                  onClick={() => setAboutMePopupUsername((current) => current === reader.username ? null : reader.username)}
+                >
+                  About me
+                </button>
+              )}
+              {!profile.isObserver && reader.username !== profile.username && (
+                <button
+                  type="button"
+                  className="tooltip-chat-button"
+                  onClick={(event) => startChatAbout(event, reader, betweenBooksActive ? '' : currentBookDetails?.title ?? '')}
+                >
+                  💬 Chat
+                </button>
+              )}
+            </div>
+            {hasAboutMe && aboutMePopupUsername === reader.username && (
+              <div className="about-me-popup" role="dialog" aria-label={`${reader.username}'s About me`}>
+                <div className="about-me-popup-header">
+                  <strong>About {reader.username}</strong>
+                  <button
+                    type="button"
+                    className="about-me-popup-close"
+                    aria-label="Close About me"
+                    onClick={() => setAboutMePopupUsername(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                {reader.aboutMeBio?.trim() ? <p>{reader.aboutMeBio}</p> : <p className="about-me-empty">No bio added.</p>}
+                {aboutMeLink && <a href={aboutMeLink} target="_blank" rel="noopener noreferrer">{aboutMeLink}</a>}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3329,7 +3545,7 @@ function App() {
     <div className="app-shell">
       <header>
         <h1>Virtual Reading World</h1>
-        <p>Choose your spot, update your status, and read.</p>
+        <p className="app-tagline">Choose your spot, update your status, and read.</p>
       </header>
 
       {!profile ? (
@@ -3438,12 +3654,14 @@ function App() {
               >
                 <div className="avatar-anchor">
                   <div className={`avatar ${profile.isGhost ? 'avatar-ghost' : ''}`}>
-                    {activeTooltipUsername === profile.username && (
+                    {activeTooltipUsername === profile.username && !isReaderBetweenBooks(profile) && (
                       renderReaderTooltip(profile, currentTooltipClassName)
                     )}
                     {renderAvatarContent(profile, profile.isObserver ? '👀' : '📚')}
                     {renderReadingTimeBadge(profile)}
-                    {!profile.isGhost && (
+                    {isReaderBetweenBooks(profile) ? (
+                      <span className="book-format-badge" role="img" aria-label="Between books" title="Between books">⏸</span>
+                    ) : !profile.isGhost && (
                       <span className="book-format-badge" role="img" aria-label="format">
                         {formatBadgeEmoji(profile.books?.[profile.currentBookIndex]?.format ?? 'physical')}
                       </span>
@@ -3489,12 +3707,14 @@ function App() {
                 >
                   <div className="avatar-anchor">
                     <div className={`avatar remote-avatar-badge ${activeTooltipUsername === reader.username ? 'avatar-hovered' : ''} ${reader.isGhost ? 'avatar-ghost' : ''}`}>
-                      {activeTooltipUsername === reader.username && (
+                      {activeTooltipUsername === reader.username && !isReaderBetweenBooks(reader) && (
                         renderReaderTooltip(reader, tooltipClassName)
                       )}
                       {renderAvatarContent(reader, '📖')}
                       {renderReadingTimeBadge(reader)}
-                      {!reader.isGhost && (
+                      {isReaderBetweenBooks(reader) ? (
+                        <span className="book-format-badge" role="img" aria-label="Between books" title="Between books">⏸</span>
+                      ) : !reader.isGhost && (
                         <span className="book-format-badge" role="img" aria-label="format">
                           {formatBadgeEmoji(reader.books?.[reader.currentBookIndex]?.format ?? 'physical')}
                         </span>
@@ -3672,6 +3892,47 @@ function App() {
                     </div>
                   </div>
                 </div>
+                <div className="profile-section-card profile-about-me-section-card">
+                  <h3>About me</h3>
+                  <div className="profile-field">
+                    <label htmlFor="aboutMeBio">Short bio</label>
+                    <textarea
+                      id="aboutMeBio"
+                      value={profileForm.aboutMeBio}
+                      maxLength={280}
+                      rows={3}
+                      placeholder="A little about you as a reader"
+                      onChange={(event) => setProfileForm((current) => ({
+                        ...current,
+                        aboutMeBio: event.target.value.slice(0, 280),
+                      }))}
+                    />
+                  </div>
+                  <div className="profile-field">
+                    <label htmlFor="aboutMeLink">Link</label>
+                    <input
+                      id="aboutMeLink"
+                      type="url"
+                      value={profileForm.aboutMeLink}
+                      maxLength={500}
+                      placeholder="https://example.com"
+                      onChange={(event) => setProfileForm((current) => ({
+                        ...current,
+                        aboutMeLink: event.target.value.slice(0, 500),
+                      }))}
+                    />
+                  </div>
+                  <div className="profile-section-action-row">
+                    <button
+                      type="button"
+                      className="secondary profile-partial-save-button"
+                      onClick={() => void saveAboutMe()}
+                      disabled={loading}
+                    >
+                      {loading ? 'Updating…' : 'Update'}
+                    </button>
+                  </div>
+                </div>
                 <div className="profile-field profile-field-divider">
                   <div className="simple-divider" aria-hidden="true" />
                   <label>Editing current book</label>
@@ -3693,12 +3954,27 @@ function App() {
                         {slot.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={`book-slot-tab between-books-tab ${isEditingBetweenBooks ? 'book-slot-tab-active' : ''}`}
+                      aria-label="Between books"
+                      aria-pressed={isEditingBetweenBooks}
+                      title="Between books"
+                      onClick={() => {
+                        setProfileForm((current) => ({
+                          ...current,
+                          editingBookIndex: BETWEEN_BOOKS_INDEX,
+                        }));
+                      }}
+                    >
+                      <span aria-hidden="true">⏸</span>
+                    </button>
                   </div>
                 </div>
                 <div className="profile-section-card">
                   <p className="progress-hint">The selected editing slot is the current book shown in scene after save.</p>
                   <div className="book-editor-box">
-                    <div className="book-editor-title">{currentBookSlotLabels[safeEditingBookIndex] || `Book ${safeEditingBookIndex + 1}`}</div>
+                    <div className="book-editor-title">{isEditingBetweenBooks ? BETWEEN_BOOKS_TITLE : currentBookSlotLabels[safeEditingBookIndex] || `Book ${safeEditingBookIndex + 1}`}</div>
                     {isEditingBetweenBooks ? (
                       <p className="progress-hint">You are between books right now. Save or update to show this in the scene tooltip.</p>
                     ) : (
@@ -3782,14 +4058,11 @@ function App() {
                             }}
                           />
                         </div>
-                        <div className="profile-field">
-                          <label htmlFor="bookCoverUpload">Book cover</label>
+                        <div className="profile-field book-cover-field">
                           <div className="book-cover-editor">
-                            {editingBook.imageData && (
-                              <img className="book-cover-preview" src={editingBook.imageData} alt={`Cover of ${editingBook.title || 'selected book'}`} />
-                            )}
-                            <div className="book-cover-actions">
-                              <label className="bulletin-image-upload-button" htmlFor="bookCoverUpload">
+                            <div className="book-cover-heading-row">
+                              <label htmlFor="bookCoverUpload">Book cover</label>
+                              <label className="bulletin-image-upload-button book-cover-upload-button" htmlFor="bookCoverUpload">
                                 {editingBook.imageData ? 'Update image' : 'Add image'}
                               </label>
                               <input
@@ -3799,7 +4072,10 @@ function App() {
                                 accept="image/*"
                                 onChange={(event) => void handleBookCoverUpload(event, safeEditingBookIndex)}
                               />
-                              {editingBook.imageData && (
+                            </div>
+                            {editingBook.imageData && (
+                              <div className="book-cover-preview-row">
+                                <img className="book-cover-preview" src={editingBook.imageData} alt={`Cover of ${editingBook.title || 'selected book'}`} />
                                 <button
                                   type="button"
                                   className="bulletin-delete-button book-cover-remove-button"
@@ -3812,8 +4088,8 @@ function App() {
                                 >
                                   <span aria-hidden="true">🗑️</span>
                                 </button>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="profile-field progress-field">
@@ -3871,6 +4147,30 @@ function App() {
                               ? 'Enter minutes or h/m format (e.g. 5h5m / 10h30m).'
                               : 'Enter page counts (e.g. 100 / 400).'}
                           </p>
+                        </div>
+                        <div className="profile-field book-feeling-field">
+                          <label htmlFor="bookFeeling">How are you feeling about this book?</label>
+                          <input
+                            id="bookFeeling"
+                            type="text"
+                            maxLength={160}
+                            value={editingBook.feeling}
+                            placeholder="A quick thought about the book so far"
+                            onChange={(event) => {
+                              const nextValue = event.target.value.replace(/[\r\n]+/g, ' ').slice(0, 160);
+                              setProfileForm((current) => {
+                                const nextBooks = [...current.books];
+                                nextBooks[safeEditingBookIndex] = {
+                                  ...nextBooks[safeEditingBookIndex],
+                                  feeling: nextValue,
+                                };
+                                return {
+                                  ...current,
+                                  books: nextBooks,
+                                };
+                              });
+                            }}
+                          />
                         </div>
                         <div className="profile-field rating-field">
                           <label htmlFor="bookRating">Current rating</label>
